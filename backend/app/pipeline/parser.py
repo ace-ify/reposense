@@ -83,6 +83,8 @@ class PyMuPDFDocumentParser(DocumentParser):
         except Exception:
             page_labels = []
 
+        last_table_start_page = 1
+
         for p_idx in range(page_count):
             page = doc[p_idx]
             rect = page.rect
@@ -201,6 +203,13 @@ class PyMuPDFDocumentParser(DocumentParser):
                 if candidate_title:
                     table_title = self._normalize_text(candidate_title)
 
+                # Check if this table is a multi-page continuation table (e.g. "Contd...", "continued")
+                if "contd" in table_title.lower() or "continued" in table_title.lower():
+                    start_page = last_table_start_page
+                else:
+                    last_table_start_page = p_idx + 1
+                    start_page = p_idx + 1
+
                 # Look for footnotes right below table bbox
                 fn_rect = pymupdf.Rect(tbl.bbox[0], tbl.bbox[3], tbl.bbox[2], min(height, tbl.bbox[3] + 40))
                 candidate_fn = page.get_text("text", clip=fn_rect).strip()
@@ -248,6 +257,7 @@ class PyMuPDFDocumentParser(DocumentParser):
                             "col_count": len(raw_header),
                             "units": detected_units,
                             "footnotes": table_footnotes,
+                            "start_page": start_page,
                         },
                         extraction_confidence=0.95,
                         warnings=[],
@@ -292,6 +302,7 @@ class PyMuPDFDocumentParser(DocumentParser):
                                 "headers": raw_header,
                                 "row_values": row,
                                 "units": detected_units,
+                                "start_page": start_page,
                             },
                             extraction_confidence=0.95,
                         )

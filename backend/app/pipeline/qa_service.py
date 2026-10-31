@@ -60,11 +60,16 @@ class QAService:
         # 1. Periods (e.g. 2023, 2022)
         periods = re.findall(r"\b(20\d\d|19\d\d)\b", question)
 
-        # 2. Measures / Metrics
+        # 2. Measures / Metrics (with strict outcome priority)
         measures: list[str] = []
-        for canonical, syns in self.METRIC_SYNONYMS.items():
-            if any(re.search(rf"\b{re.escape(s)}\b", q_lower) for s in syns):
-                measures.append(canonical)
+        if any(w in q_lower for w in ["killed", "death", "deaths", "fatal", "fatalities"]):
+            measures.append("killed")
+        elif any(w in q_lower for w in ["injured", "injury", "injuries"]):
+            measures.append("injured")
+        elif any(w in q_lower for w in ["ranking", "rank"]):
+            measures.append("ranking")
+        elif any(w in q_lower for w in ["accident", "accidents", "crashes"]):
+            measures.append("accidents")
 
         # 3. Target Entities
         # Look for prepositional phrases: "in X city", "in X state", "in X", "for X", "of X"
@@ -83,6 +88,20 @@ class QAService:
             ent_clean = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed)\b", "", ent, flags=re.IGNORECASE).strip()
             if ent_clean and len(ent_clean) > 2 and ent_clean.lower() not in ("the", "which", "what"):
                 entities.append(ent_clean)
+
+        # "involved <Entity>"
+        m_inv = re.search(r"\binvolved\s+([A-Za-z\s\-]+?)(?:\?|$)", question, re.IGNORECASE)
+        if m_inv:
+            ent = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed|in\s+20\d\d)\b", "", m_inv.group(1), flags=re.IGNORECASE).strip()
+            if len(ent) > 2:
+                entities.append(ent)
+
+        # "how many <Entity> were reported/occurred"
+        m_hm = re.search(r"\bhow many\s+([A-Za-z\s\-]+?)\s+(?:were reported|occurred|were killed|were injured|in\s+20|\?)", question, re.IGNORECASE)
+        if m_hm:
+            ent = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed|injury|injured)\b", "", m_hm.group(1), flags=re.IGNORECASE).strip()
+            if len(ent) > 2 and ent.lower() not in ("the", "which", "what"):
+                entities.append(ent)
 
         # Road user types e.g. "two-wheeler", "pedestrian", "car", "bicycle", "truck", "bus"
         user_types = ["two-wheeler", "two-wheelers", "two wheeler", "two wheelers", "pedestrian", "pedestrians", "bicycle", "bicycles", "cyclist", "auto rickshaw", "car", "cars", "truck", "trucks", "bus", "buses"]
@@ -129,14 +148,12 @@ class QAService:
         candidates = list(self.registry.retriever.retrieve(question, [document_id], top_k=25))
 
         # 1. Groq Reasoning Path (if configured)
-        if self.groq_api_key:
+        if self.groq_api_key and len(self.groq_api_key) > 10:
             groq_res = self._ask_groq(question, candidates, entities, measures, periods)
             if groq_res:
                 ans, page, conf = groq_res
                 # Validate that integer actually exists in candidates on that page
-                if ans == "NOT_FOUND":
-                    return "NOT_FOUND", None, conf
-                if self._validate_evidence_claim(ans, page, candidates):
+                if ans != "NOT_FOUND" and self._validate_evidence_claim(ans, page, candidates):
                     return ans, page, conf
 
         # 2. Deterministic Fallback Path
@@ -240,7 +257,7 @@ class QAService:
             if ev.kind == "table_cell" and "headers" in ev.metadata and "row_values" in ev.metadata:
                 headers: list[str] = ev.metadata.get("headers", [])
                 row_vals: list[str] = ev.metadata.get("row_values", [])
-                page_num = ev.pdf_page_index + 1
+                page_num = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
 
                 # Check if entity matches this row
                 row_text = ev.text.lower()
@@ -304,7 +321,7 @@ class QAService:
         # Priority 2: Full markdown tables
         for ev in candidates:
             if ev.kind == "table" or "|" in ev.text:
-                page_num = ev.pdf_page_index + 1
+                page_num = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
                 lines = [line.strip() for line in ev.text.split("\n") if line.strip().startswith("|")]
                 if len(lines) >= 2:
                     headers = [c.strip().lower() for c in lines[0].strip("|").split("|")]
