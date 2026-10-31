@@ -40,9 +40,9 @@ class PyMuPDFDocumentParser(DocumentParser):
 
     def _extract_units(self, text: str) -> str | None:
         for pattern in self.UNIT_PATTERNS:
-            match = pattern.search(text)
-            if match:
-                return match.group(0).lower()
+            match pattern.search(text):
+                case match if match:
+                    return match.group(0).lower()
         return None
 
     def _detect_footnotes(self, text: str) -> list[str]:
@@ -119,353 +119,353 @@ class PyMuPDFDocumentParser(DocumentParser):
                     tbl_id = f"tbl_{document_id}_p{p_idx}_{page_table_count}"
                     table_rects.append(pymupdf.Rect(tbl.bbox))
 
-                # Normalized bounding box
-                t_bbox = BoundingBox(
-                    x0=max(0.0, min(1.0, float(tbl.bbox[0]) / width)),
-                    y0=max(0.0, min(1.0, float(tbl.bbox[1]) / height)),
-                    x1=max(0.0, min(1.0, float(tbl.bbox[2]) / width)),
-                    y1=max(0.0, min(1.0, float(tbl.bbox[3]) / height)),
-                )
+                    # Normalized bounding box
+                    t_bbox = BoundingBox(
+                        x0=max(0.0, min(1.0, float(tbl.bbox[0]) / width)),
+                        y0=max(0.0, min(1.0, float(tbl.bbox[1]) / height)),
+                        x1=max(0.0, min(1.0, float(tbl.bbox[2]) / width)),
+                        y1=max(0.0, min(1.0, float(tbl.bbox[3]) / height)),
+                    )
 
-                extracted_data = tbl.extract()
-                if not extracted_data or len(extracted_data) == 0:
-                    continue
-
-                # Detect header rows vs data rows dynamically across multi-level tables
-                first_data_idx = 1
-                for idx in range(min(5, len(extracted_data))):
-                    r = extracted_data[idx]
-                    if not r:
+                    extracted_data = tbl.extract()
+                    if not extracted_data or len(extracted_data) == 0:
                         continue
-                    c0 = str(r[0] or "").strip()
-                    c1 = str(r[1] or "").strip() if len(r) > 1 else ""
-                    if c0.isdigit() and len(c1) > 1 and not c1.isdigit():
-                        first_data_idx = idx
-                        break
 
-                header_rows = extracted_data[:first_data_idx]
-                data_rows_raw = extracted_data[first_data_idx:]
-                num_cols = len(extracted_data[0])
+                    # Detect header rows vs data rows dynamically across multi-level tables
+                    first_data_idx = 1
+                    for idx in range(min(5, len(extracted_data))):
+                        r = extracted_data[idx]
+                        if not r:
+                            continue
+                        c0 = str(r[0] or "").strip()
+                        c1 = str(r[1] or "").strip() if len(r) > 1 else ""
+                        if c0.isdigit() and len(c1) > 1 and not c1.isdigit():
+                            first_data_idx = idx
+                            break
 
-                # Forward fill merged headers across columns
-                filled_headers = []
-                for h_row in header_rows:
-                    filled = []
-                    last_val = ""
-                    for cell in h_row:
-                        val = self._normalize_text(str(cell or ""))
-                        if val:
-                            last_val = val
-                        filled.append(last_val)
-                    while len(filled) < num_cols:
-                        filled.append(last_val)
-                    filled_headers.append(filled)
+                    header_rows = extracted_data[:first_data_idx]
+                    data_rows_raw = extracted_data[first_data_idx:]
+                    num_cols = len(extracted_data[0])
 
-                # Merge vertical header hierarchy per column
-                raw_header: list[str] = []
-                for col in range(num_cols):
-                    col_parts = []
-                    for h_row in filled_headers:
-                        val = h_row[col]
-                        if val and val not in col_parts:
-                            col_parts.append(val)
-                    merged_col = " - ".join(col_parts) if col_parts else f"Col {col + 1}"
-                    raw_header.append(merged_col)
+                    # Forward fill merged headers across columns
+                    filled_headers = []
+                    for h_row in header_rows:
+                        filled = []
+                        last_val = ""
+                        for cell in h_row:
+                            val = self._normalize_text(str(cell or ""))
+                            if val:
+                                last_val = val
+                            filled.append(last_val)
+                        while len(filled) < num_cols:
+                            filled.append(last_val)
+                        filled_headers.append(filled)
 
-                headers: list[list[str]] = [raw_header]
-                rows: list[list[Any]] = []
+                    # Merge vertical header hierarchy per column
+                    raw_header: list[str] = []
+                    for col in range(num_cols):
+                        col_parts = []
+                        for h_row in filled_headers:
+                            val = h_row[col]
+                            if val and val not in col_parts:
+                                col_parts.append(val)
+                        merged_col = " - ".join(col_parts) if col_parts else f"Col {col + 1}"
+                        raw_header.append(merged_col)
 
-                for r_data in data_rows_raw:
-                    row_data = [self._normalize_text(str(cell or "")) for cell in r_data]
-                    if any(c for c in row_data):
-                        rows.append(row_data)
+                    headers: list[list[str]] = [raw_header]
+                    rows: list[list[Any]] = []
 
-                # Build readable Markdown representation
-                md_lines = []
-                if raw_header:
-                    md_lines.append("| " + " | ".join(raw_header) + " |")
-                    md_lines.append("| " + " | ".join(["---"] * len(raw_header)) + " |")
-                for r in rows:
-                    md_lines.append("| " + " | ".join(str(c) for c in r) + " |")
-                table_md = "\n".join(md_lines)
+                    for r_data in data_rows_raw:
+                        row_data = [self._normalize_text(str(cell or "")) for cell in r_data]
+                        if any(c for c in row_data):
+                            rows.append(row_data)
 
-                # Detect units from header
-                detected_units: dict[str, str] = {}
-                for h in raw_header:
-                    unit = self._extract_units(h)
-                    if unit:
-                        detected_units[h] = unit
+                    # Build readable Markdown representation
+                    md_lines = []
+                    if raw_header:
+                        md_lines.append("| " + " | ".join(raw_header) + " |")
+                        md_lines.append("| " + " | ".join(["---"] * len(raw_header)) + " |")
+                    for r in rows:
+                        md_lines.append("| " + " | ".join(str(c) for c in r) + " |")
+                    table_md = "\n".join(md_lines)
 
-                # Detect table title and footnotes
-                table_title = f"Table on Page {printed_label}"
-                table_footnotes: list[str] = []
+                    # Detect units from header
+                    detected_units: dict[str, str] = {}
+                    for h in raw_header:
+                        unit = self._extract_units(h)
+                        if unit:
+                            detected_units[h] = unit
 
-                # Look for potential title right above table bbox
-                title_rect = pymupdf.Rect(tbl.bbox[0], max(0, tbl.bbox[1] - 30), tbl.bbox[2], tbl.bbox[1])
-                candidate_title = page.get_text("text", clip=title_rect).strip()
-                if candidate_title:
-                    table_title = self._normalize_text(candidate_title)
+                    # Detect table title and footnotes
+                    table_title = f"Table on Page {printed_label}"
+                    table_footnotes: list[str] = []
 
-                # Check if this table is a multi-page continuation table (e.g. "Contd...", "continued")
-                if "contd" in table_title.lower() or "continued" in table_title.lower():
-                    start_page = last_table_start_page
-                else:
-                    last_table_start_page = p_idx + 1
-                    start_page = p_idx + 1
+                    # Look for potential title right above table bbox
+                    title_rect = pymupdf.Rect(tbl.bbox[0], max(0, tbl.bbox[1] - 30), tbl.bbox[2], tbl.bbox[1])
+                    candidate_title = page.get_text("text", clip=title_rect).strip()
+                    if candidate_title:
+                        table_title = self._normalize_text(candidate_title)
 
-                # Look for footnotes right below table bbox
-                fn_rect = pymupdf.Rect(tbl.bbox[0], tbl.bbox[3], tbl.bbox[2], min(height, tbl.bbox[3] + 40))
-                candidate_fn = page.get_text("text", clip=fn_rect).strip()
-                if candidate_fn:
-                    table_footnotes.extend(self._detect_footnotes(candidate_fn))
+                    # Check if this table is a multi-page continuation table (e.g. "Contd...", "continued")
+                    if "contd" in table_title.lower() or "continued" in table_title.lower():
+                        start_page = last_table_start_page
+                    else:
+                        last_table_start_page = p_idx + 1
+                        start_page = p_idx + 1
 
-                table_item = TableItem(
-                    table_id=tbl_id,
-                    document_id=document_id,
-                    pdf_page_index=p_idx,
-                    printed_page_number=printed_label,
-                    title=table_title,
-                    headers=headers,
-                    rows=rows,
-                    units=detected_units,
-                    footnotes=table_footnotes,
-                    bbox=t_bbox,
-                    extraction_confidence=0.95,
-                    warnings=[],
-                )
-                table_items.append(table_item)
+                    # Look for footnotes right below table bbox
+                    fn_rect = pymupdf.Rect(tbl.bbox[0], tbl.bbox[3], tbl.bbox[2], min(height, tbl.bbox[3] + 40))
+                    candidate_fn = page.get_text("text", clip=fn_rect).strip()
+                    if candidate_fn:
+                        table_footnotes.extend(self._detect_footnotes(candidate_fn))
 
-                # Create top-level EvidenceItem for the table
-                tbl_ev_id = f"ev_tbl_{document_id}_p{p_idx}_{page_table_count}"
-                table_evidence_text = f"Title: {table_title}\n{table_md}"
-                if table_footnotes:
-                    table_evidence_text += "\nFootnotes:\n" + "\n".join(table_footnotes)
-
-                evidence_items.append(
-                    EvidenceItem(
-                        evidence_id=tbl_ev_id,
+                    table_item = TableItem(
+                        table_id=tbl_id,
                         document_id=document_id,
                         pdf_page_index=p_idx,
                         printed_page_number=printed_label,
-                        kind="table",
-                        text=table_evidence_text,
-                        normalized_text=self._normalize_text(table_evidence_text),
+                        title=table_title,
+                        headers=headers,
+                        rows=rows,
+                        units=detected_units,
+                        footnotes=table_footnotes,
                         bbox=t_bbox,
-                        parent_id=None,
-                        metadata={
-                            "table_id": tbl_id,
-                            "title": table_title,
-                            "headers": raw_header,
-                            "row_count": len(rows),
-                            "col_count": len(raw_header),
-                            "units": detected_units,
-                            "footnotes": table_footnotes,
-                            "start_page": start_page,
-                        },
                         extraction_confidence=0.95,
                         warnings=[],
                     )
-                )
+                    table_items.append(table_item)
 
-                # Create structured row evidence items for surgical citations
-                for r_idx, row in enumerate(rows):
-                    row_desc = []
-                    for c_idx, cell_val in enumerate(row):
-                        header_name = raw_header[c_idx] if c_idx < len(raw_header) else f"Col {c_idx+1}"
-                        if cell_val:
-                            row_desc.append(f"{header_name}: {cell_val}")
-                    row_text = f"{table_title} | " + " | ".join(row_desc)
-
-                    row_ev_id = f"ev_row_{document_id}_p{p_idx}_{page_table_count}_r{r_idx}"
-                    # Approximate row bbox vertically inside table bbox
-                    num_rows = max(1, len(rows) + 1)
-                    r_y0 = t_bbox.y0 + (t_bbox.y1 - t_bbox.y0) * ((r_idx + 1) / num_rows)
-                    r_y1 = t_bbox.y0 + (t_bbox.y1 - t_bbox.y0) * ((r_idx + 2) / num_rows)
-                    row_bbox = BoundingBox(
-                        x0=t_bbox.x0,
-                        y0=r_y0,
-                        x1=t_bbox.x1,
-                        y1=min(t_bbox.y1, r_y1),
-                    )
+                    # Create top-level EvidenceItem for the table
+                    tbl_ev_id = f"ev_tbl_{document_id}_p{p_idx}_{page_table_count}"
+                    table_evidence_text = f"Title: {table_title}\n{table_md}"
+                    if table_footnotes:
+                        table_evidence_text += "\nFootnotes:\n" + "\n".join(table_footnotes)
 
                     evidence_items.append(
                         EvidenceItem(
-                            evidence_id=row_ev_id,
+                            evidence_id=tbl_ev_id,
                             document_id=document_id,
                             pdf_page_index=p_idx,
                             printed_page_number=printed_label,
-                            kind="table_cell",
-                            text=row_text,
-                            normalized_text=self._normalize_text(row_text),
-                            bbox=row_bbox,
-                            parent_id=tbl_ev_id,
+                            kind="table",
+                            text=table_evidence_text,
+                            normalized_text=self._normalize_text(table_evidence_text),
+                            bbox=t_bbox,
+                            parent_id=None,
                             metadata={
                                 "table_id": tbl_id,
-                                "row_index": r_idx,
+                                "title": table_title,
                                 "headers": raw_header,
-                                "row_values": row,
+                                "row_count": len(rows),
+                                "col_count": len(raw_header),
                                 "units": detected_units,
+                                "footnotes": table_footnotes,
                                 "start_page": start_page,
                             },
                             extraction_confidence=0.95,
+                            warnings=[],
                         )
                     )
 
-            # 2. Extract narrative text blocks (paragraphs, headings, footnotes)
-            raw_blocks = page.get_text("blocks")
-            narrative_count = 0
-            has_text = False
+                    # Create structured row evidence items for surgical citations
+                    for r_idx, row in enumerate(rows):
+                        row_desc = []
+                        for c_idx, cell_val in enumerate(row):
+                            header_name = raw_header[c_idx] if c_idx < len(raw_header) else f"Col {c_idx+1}"
+                            if cell_val:
+                                row_desc.append(f"{header_name}: {cell_val}")
+                        row_text = f"{table_title} | " + " | ".join(row_desc)
 
-            # Merge vertically adjacent line fragments into full paragraphs
-            merged_blocks: list[list[Any]] = []
-            for b in raw_blocks:
-                b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
-                raw_b_text = str(b[4]).strip()
-                if not raw_b_text:
-                    continue
+                        row_ev_id = f"ev_row_{document_id}_p{p_idx}_{page_table_count}_r{r_idx}"
+                        # Approximate row bbox vertically inside table bbox
+                        num_rows = max(1, len(rows) + 1)
+                        r_y0 = t_bbox.y0 + (t_bbox.y1 - t_bbox.y0) * ((r_idx + 1) / num_rows)
+                        r_y1 = t_bbox.y0 + (t_bbox.y1 - t_bbox.y0) * ((r_idx + 2) / num_rows)
+                        row_bbox = BoundingBox(
+                            x0=t_bbox.x0,
+                            y0=r_y0,
+                            x1=t_bbox.x1,
+                            y1=min(t_bbox.y1, r_y1),
+                        )
 
-                has_text = True
+                        evidence_items.append(
+                            EvidenceItem(
+                                evidence_id=row_ev_id,
+                                document_id=document_id,
+                                pdf_page_index=p_idx,
+                                printed_page_number=printed_label,
+                                kind="table_cell",
+                                text=row_text,
+                                normalized_text=self._normalize_text(row_text),
+                                bbox=row_bbox,
+                                parent_id=tbl_ev_id,
+                                metadata={
+                                    "table_id": tbl_id,
+                                    "row_index": r_idx,
+                                    "headers": raw_header,
+                                    "row_values": row,
+                                    "units": detected_units,
+                                    "start_page": start_page,
+                                },
+                                extraction_confidence=0.95,
+                            )
+                        )
 
-                # Check if block overlaps significantly with any table
-                overlaps_table = False
-                for tbl_rect in table_rects:
-                    intersect = b_rect & tbl_rect
-                    if intersect.get_area() > 0.4 * b_rect.get_area():
-                        overlaps_table = True
-                        break
-                if overlaps_table:
-                    continue
+                # 2. Extract narrative text blocks (paragraphs, headings, footnotes)
+                raw_blocks = page.get_text("blocks")
+                narrative_count = 0
+                has_text = False
 
-                # Try merging with previous block if vertically adjacent (< 12pt gap) and similar left margin
-                if merged_blocks:
-                    prev = merged_blocks[-1]
-                    prev_rect = pymupdf.Rect(prev[0], prev[1], prev[2], prev[3])
-                    v_gap = b_rect.y0 - prev_rect.y1
-                    h_diff = abs(b_rect.x0 - prev_rect.x0)
-
-                    # Only merge if gap is small and not starting a new section/heading
-                    if 0 <= v_gap < 12 and h_diff < 20 and not b_rect.y0 > 0.85:
-                        merged_blocks[-1] = [
-                            min(prev[0], b[0]),
-                            min(prev[1], b[1]),
-                            max(prev[2], b[2]),
-                            max(prev[3], b[3]),
-                            prev[4].rstrip() + " " + raw_b_text,
-                            prev[5],
-                        ]
+                # Merge vertically adjacent line fragments into full paragraphs
+                merged_blocks: list[list[Any]] = []
+                for b in raw_blocks:
+                    b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
+                    raw_b_text = str(b[4]).strip()
+                    if not raw_b_text:
                         continue
 
-                merged_blocks.append(list(b))
+                    has_text = True
 
-            for b in merged_blocks:
-                b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
-                raw_b_text = str(b[4]).strip()
+                    # Check if block overlaps significantly with any table
+                    overlaps_table = False
+                    for tbl_rect in table_rects:
+                        intersect = b_rect & tbl_rect
+                        if intersect.get_area() > 0.4 * b_rect.get_area():
+                            overlaps_table = True
+                            break
+                    if overlaps_table:
+                        continue
 
-                narrative_count += 1
-                ev_id = f"ev_narr_{document_id}_p{p_idx}_{narrative_count}"
+                    # Try merging with previous block if vertically adjacent (< 12pt gap) and similar left margin
+                    if merged_blocks:
+                        prev = merged_blocks[-1]
+                        prev_rect = pymupdf.Rect(prev[0], prev[1], prev[2], prev[3])
+                        v_gap = b_rect.y0 - prev_rect.y1
+                        h_diff = abs(b_rect.x0 - prev_rect.x0)
 
-                b_bbox = BoundingBox(
-                    x0=max(0.0, min(1.0, float(b[0]) / width)),
-                    y0=max(0.0, min(1.0, float(b[1]) / height)),
-                    x1=max(0.0, min(1.0, float(b[2]) / width)),
-                    y1=max(0.0, min(1.0, float(b[3]) / height)),
-                )
+                        # Only merge if gap is small and not starting a new section/heading
+                        if 0 <= v_gap < 12 and h_diff < 20 and not b_rect.y0 > 0.85:
+                            merged_blocks[-1] = [
+                                min(prev[0], b[0]),
+                                min(prev[1], b[1]),
+                                max(prev[2], b[2]),
+                                max(prev[3], b[3]),
+                                prev[4].rstrip() + " " + raw_b_text,
+                                prev[5],
+                            ]
+                            continue
 
-                # Classify kind: heading vs paragraph vs footnote vs caption
-                kind: EvidenceKind = "paragraph"
-                normalized = self._normalize_text(raw_b_text)
+                    merged_blocks.append(list(b))
 
-                if len(normalized) < 80 and (
-                    re.match(r"^(section|\d+\.|\d+\.\d+|chapter|executive summary|overview|key findings|introduction|table of contents|appendix)", normalized, re.IGNORECASE)
-                    or normalized.isupper()
-                ):
-                    kind = "heading"
-                elif b_bbox.y0 > 0.85 and (
-                    re.match(r"^(\*|\†|\‡|\d+[/)]|note:|source:|sources:)", normalized, re.IGNORECASE)
-                ):
-                    kind = "footnote"
-                elif re.match(r"^(figure\s+\d+|chart\s+\d+|exhibit\s+\d+|table\s+\d+):", normalized, re.IGNORECASE):
-                    kind = "caption"
+                for b in merged_blocks:
+                    b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
+                    raw_b_text = str(b[4]).strip()
 
-                evidence_items.append(
-                    EvidenceItem(
-                        evidence_id=ev_id,
+                    narrative_count += 1
+                    ev_id = f"ev_narr_{document_id}_p{p_idx}_{narrative_count}"
+
+                    b_bbox = BoundingBox(
+                        x0=max(0.0, min(1.0, float(b[0]) / width)),
+                        y0=max(0.0, min(1.0, float(b[1]) / height)),
+                        x1=max(0.0, min(1.0, float(b[2]) / width)),
+                        y1=max(0.0, min(1.0, float(b[3]) / height)),
+                    )
+
+                    # Classify kind: heading vs paragraph vs footnote vs caption
+                    kind: EvidenceKind = "paragraph"
+                    normalized = self._normalize_text(raw_b_text)
+
+                    if len(normalized) < 80 and (
+                        re.match(r"^(section|\d+\.|\d+\.\d+|chapter|executive summary|overview|key findings|introduction|table of contents|appendix)", normalized, re.IGNORECASE)
+                        or normalized.isupper()
+                    ):
+                        kind = "heading"
+                    elif b_bbox.y0 > 0.85 and (
+                        re.match(r"^(\*|\†|\‡|\d+[/)]|note:|source:|sources:)", normalized, re.IGNORECASE)
+                    ):
+                        kind = "footnote"
+                    elif re.match(r"^(figure\s+\d+|chart\s+\d+|exhibit\s+\d+|table\s+\d+):", normalized, re.IGNORECASE):
+                        kind = "caption"
+
+                    evidence_items.append(
+                        EvidenceItem(
+                            evidence_id=ev_id,
+                            document_id=document_id,
+                            pdf_page_index=p_idx,
+                            printed_page_number=printed_label,
+                            kind=kind,
+                            text=raw_b_text,
+                            normalized_text=normalized,
+                            bbox=b_bbox,
+                            parent_id=None,
+                            metadata={
+                                "block_number": b[5],
+                                "line_count": len(raw_b_text.splitlines()),
+                            },
+                            extraction_confidence=0.98,
+                            warnings=[],
+                        )
+                    )
+
+                extraction_method = "native_text"
+                if not has_text:
+                    extraction_method = "ocr"
+                    ocr_succeeded = False
+                    # Limit selective OCR to at most 2 pages and use 72 DPI to prevent gateway timeouts and OOM kills on fresh instances
+                    if ocr_count < 2:
+                        try:
+                            tp = page.get_textpage_ocr(dpi=72)
+                            ocr_blocks = tp.extractBLOCKS()
+                            if ocr_blocks:
+                                for b in ocr_blocks:
+                                    raw_b = str(b[4]).strip()
+                                    if not raw_b:
+                                        continue
+                                    narrative_count += 1
+                                    ev_id = f"ev_ocr_{document_id}_p{p_idx}_{narrative_count}"
+                                    b_bbox = BoundingBox(
+                                        x0=max(0.0, min(1.0, float(b[0]) / width)),
+                                        y0=max(0.0, min(1.0, float(b[1]) / height)),
+                                        x1=max(0.0, min(1.0, float(b[2]) / width)),
+                                        y1=max(0.0, min(1.0, float(b[3]) / height)),
+                                    )
+                                    evidence_items.append(
+                                        EvidenceItem(
+                                            evidence_id=ev_id,
+                                            document_id=document_id,
+                                            pdf_page_index=p_idx,
+                                            printed_page_number=printed_label,
+                                            kind="paragraph",
+                                            text=raw_b,
+                                            normalized_text=self._normalize_text(raw_b),
+                                            bbox=b_bbox,
+                                            metadata={"source": "ocr", "line_count": len(raw_b.splitlines())},
+                                            extraction_confidence=0.88,
+                                            warnings=["Extracted via selective OCR."],
+                                        )
+                                    )
+                                ocr_succeeded = True
+                                ocr_count += 1
+                        except Exception as e:
+                            page_warnings.append(f"Page requires OCR; local OCR fallback attempted: {e}")
+                    else:
+                        page_warnings.append("No native text found on page; page requires OCR inspection.")
+
+                    if not ocr_succeeded and not page_warnings:
+                        page_warnings.append("No native text found on page; page requires OCR inspection.")
+
+                provenances.append(
+                    PageProvenance(
                         document_id=document_id,
                         pdf_page_index=p_idx,
                         printed_page_number=printed_label,
-                        kind=kind,
-                        text=raw_b_text,
-                        normalized_text=normalized,
-                        bbox=b_bbox,
-                        parent_id=None,
-                        metadata={
-                            "block_number": b[5],
-                            "line_count": len(raw_b_text.splitlines()),
-                        },
-                        extraction_confidence=0.98,
-                        warnings=[],
+                        page_width=width,
+                        page_height=height,
+                        rotation=rotation,
+                        extraction_method=extraction_method,
+                        warnings=page_warnings,
                     )
                 )
-
-            extraction_method = "native_text"
-            if not has_text:
-                extraction_method = "ocr"
-                ocr_succeeded = False
-                # Limit selective OCR to at most 2 pages and use 72 DPI to prevent gateway timeouts and OOM kills on fresh instances
-                if ocr_count < 2:
-                    try:
-                        tp = page.get_textpage_ocr(dpi=72)
-                        ocr_blocks = tp.extractBLOCKS()
-                        if ocr_blocks:
-                            for b in ocr_blocks:
-                                raw_b = str(b[4]).strip()
-                                if not raw_b:
-                                    continue
-                                narrative_count += 1
-                                ev_id = f"ev_ocr_{document_id}_p{p_idx}_{narrative_count}"
-                                b_bbox = BoundingBox(
-                                    x0=max(0.0, min(1.0, float(b[0]) / width)),
-                                    y0=max(0.0, min(1.0, float(b[1]) / height)),
-                                    x1=max(0.0, min(1.0, float(b[2]) / width)),
-                                    y1=max(0.0, min(1.0, float(b[3]) / height)),
-                                )
-                                evidence_items.append(
-                                    EvidenceItem(
-                                        evidence_id=ev_id,
-                                        document_id=document_id,
-                                        pdf_page_index=p_idx,
-                                        printed_page_number=printed_label,
-                                        kind="paragraph",
-                                        text=raw_b,
-                                        normalized_text=self._normalize_text(raw_b),
-                                        bbox=b_bbox,
-                                        metadata={"source": "ocr", "line_count": len(raw_b.splitlines())},
-                                        extraction_confidence=0.88,
-                                        warnings=["Extracted via selective OCR."],
-                                    )
-                                )
-                            ocr_succeeded = True
-                            ocr_count += 1
-                    except Exception as e:
-                        page_warnings.append(f"Page requires OCR; local OCR fallback attempted: {e}")
-                else:
-                    page_warnings.append("No native text found on page; page requires OCR inspection.")
-
-                if not ocr_succeeded and not page_warnings:
-                    page_warnings.append("No native text found on page; page requires OCR inspection.")
-
-            provenances.append(
-                PageProvenance(
-                    document_id=document_id,
-                    pdf_page_index=p_idx,
-                    printed_page_number=printed_label,
-                    page_width=width,
-                    page_height=height,
-                    rotation=rotation,
-                    extraction_method=extraction_method,
-                    warnings=page_warnings,
-                )
-            )
         finally:
             doc.close()
 
@@ -482,4 +482,3 @@ class PyMuPDFDocumentParser(DocumentParser):
         )
 
         return doc_item, provenances, evidence_items, table_items
-

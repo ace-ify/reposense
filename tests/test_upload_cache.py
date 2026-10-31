@@ -12,7 +12,7 @@ def make_pdf(text: str) -> bytes:
     pdf = pymupdf.open()
     page = pdf.new_page()
     page.insert_text((72, 72), text)
-    contents = pdf.tobytes()
+    contents = pdf.tobytes(deflate=False)
     pdf.close()
     return contents
 

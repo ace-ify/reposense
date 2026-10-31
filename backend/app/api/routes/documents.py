@@ -1,3 +1,4 @@
+import logging
 import re
 import shutil
 import tempfile
@@ -9,6 +10,8 @@ from fastapi.responses import FileResponse
 from backend.app.pipeline.registry import get_registry
 from backend.app.schemas.evidence import DocumentItem, EvidenceItem, TableItem
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 @router.post("", response_model=DocumentItem, status_code=201)
@@ -16,15 +19,23 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentItem:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
+    logger.info(f"[UPLOAD] Request entered: filename={file.filename}")
+
     registry = get_registry()
     suffix = Path(file.filename).suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
         tmp_path = Path(tmp.name)
 
+    logger.info(f"[UPLOAD] File saved to temp: path={tmp_path.name}")
+
     try:
         doc_item = registry.register_file(tmp_path, file.filename)
+        logger.info(f"[UPLOAD] Document registered successfully: doc_id={doc_item.document_id}")
         return doc_item
+    except Exception as exc:
+        logger.exception(f"[UPLOAD] Document processing failed for filename={file.filename}")
+        raise HTTPException(status_code=500, detail=f"Failed to process document: {exc}") from exc
     finally:
         if tmp_path.exists():
             tmp_path.unlink()

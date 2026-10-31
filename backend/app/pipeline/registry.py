@@ -1,6 +1,7 @@
 import gzip
 import hashlib
 import json
+import logging
 import shutil
 from pathlib import Path
 from backend.app.core.config import get_settings
@@ -12,6 +13,8 @@ from backend.app.schemas.evidence import (
     PageProvenance,
     TableItem,
 )
+
+logger = logging.getLogger(__name__)
 
 class DocumentRegistry:
     """
@@ -101,8 +104,16 @@ class DocumentRegistry:
                     )
         else:
             # Parse document
-            doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
-                destination, document_id
+            logger.info(f"[PIPELINE] Parsing started: doc_id={document_id}, filename={filename}")
+            try:
+                doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
+                    destination, document_id
+                )
+            except Exception as e:
+                logger.exception(f"[PIPELINE] Parsing failed: doc_id={document_id}")
+                raise
+            logger.info(
+                f"[PIPELINE] Parsing completed: doc_id={document_id}, page_count={doc_item.page_count}"
             )
             try:
                 with gzip.open(cache_file, "wt", encoding="utf-8") as f:
@@ -125,7 +136,12 @@ class DocumentRegistry:
         self.tables[document_id] = table_items
 
         # Index in hybrid retriever
-        self.retriever.index_document(document_id, evidence_items, table_items)
+        try:
+            self.retriever.index_document(document_id, evidence_items, table_items)
+            logger.info(f"[PIPELINE] Indexing completed: doc_id={document_id}")
+        except Exception as e:
+            logger.exception(f"[PIPELINE] Indexing failed: doc_id={document_id}")
+            raise
 
         return doc_item
 
