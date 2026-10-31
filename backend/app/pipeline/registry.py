@@ -36,13 +36,62 @@ class DocumentRegistry:
 
         document_id = doc_id or f"doc_{len(self.documents) + 1}"
         destination = self.upload_dir / f"{document_id}_{filename}"
-        shutil.copy2(file_path, destination)
+        if not destination.exists():
+            shutil.copy2(file_path, destination)
         self.file_paths[document_id] = destination
 
-        # Parse document
-        doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
-            destination, document_id
-        )
+        # Check disk cache
+        cache_dir = self.upload_dir / ".cache"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        file_stat = file_path.stat()
+        cache_key = f"{file_path.stem}_{file_stat.st_size}"
+        cache_file = cache_dir / f"{cache_key}.json.gz"
+
+        if cache_file.exists():
+            import gzip
+            import json
+            try:
+                with gzip.open(cache_file, "rt", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+                doc_item = DocumentItem(**cache_data["doc_item"])
+                doc_item.document_id = document_id
+                page_provs = [PageProvenance(**p) for p in cache_data["page_provs"]]
+                evidence_items = [EvidenceItem(**e) for e in cache_data["evidence_items"]]
+                table_items = [TableItem(**t) for t in cache_data["table_items"]]
+            except Exception:
+                doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
+                    destination, document_id
+                )
+                with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "doc_item": doc_item.model_dump(),
+                            "page_provs": [p.model_dump() for p in page_provs],
+                            "evidence_items": [e.model_dump() for e in evidence_items],
+                            "table_items": [t.model_dump() for t in table_items],
+                        },
+                        f,
+                    )
+        else:
+            # Parse document
+            doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
+                destination, document_id
+            )
+            import gzip
+            import json
+            try:
+                with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "doc_item": doc_item.model_dump(),
+                            "page_provs": [p.model_dump() for p in page_provs],
+                            "evidence_items": [e.model_dump() for e in evidence_items],
+                            "table_items": [t.model_dump() for t in table_items],
+                        },
+                        f,
+                    )
+            except Exception:
+                pass
 
         # Store in registry
         self.documents[document_id] = doc_item

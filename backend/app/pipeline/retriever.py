@@ -21,14 +21,20 @@ STOPWORDS = {
     "your", "yours", "yourself", "yourselves"
 }
 
+def normalize_token(t: str) -> str:
+    """Normalize simple plurals and suffixes so queries match table headers/cells."""
+    if len(t) > 3 and t.endswith("s") and not t.endswith("ss"):
+        return t[:-1]
+    return t
+
 def tokenize(text: str) -> list[str]:
     cleaned = re.sub(r"[^\w\s\$\%\.]", " ", text.lower())
-    tokens = [t.strip(".") for t in cleaned.split() if len(t.strip(".")) > 1]
+    tokens = [normalize_token(t.strip(".")) for t in cleaned.split() if len(t.strip(".")) > 1]
     return [t for t in tokens if t not in STOPWORDS or t in {"what", "which", "who", "when"}]
 
 
 class BM25Index:
-    def __init__(self, k1: float = 1.5, b: float = 0.75):
+    def __init__(self, k1: float = 1.2, b: float = 0.3):
         self.k1 = k1
         self.b = b
         self.docs: list[EvidenceItem] = []
@@ -139,6 +145,7 @@ class HybridEvidenceRetriever(EvidenceRetriever):
         document_ids: list[str],
         top_k: int = 8,
         min_score: float = 0.0,
+        entities: list[str] | None = None,
     ) -> Sequence[EvidenceItem]:
         all_candidates: list[EvidenceItem] = []
         for doc_id in document_ids:
@@ -182,7 +189,17 @@ class HybridEvidenceRetriever(EvidenceRetriever):
         for ev_id, rank in semantic_ranks.items():
             fused_scores[ev_id] += 1.0 / (self.rrf_k + rank)
 
-        # 4. Context Expansion for tables
+        # 4. Entity Boost: dynamically prioritize candidates containing the question entities
+        if entities:
+            clean_entities = [e.lower().strip() for e in entities if len(e.strip()) > 1]
+            for item in all_candidates:
+                item_text_lower = item.text.lower()
+                matched_count = sum(1 for ent in clean_entities if ent in item_text_lower)
+                if matched_count > 0:
+                    type_mult = 2.5 if item.kind in ("table_cell", "table") else 1.0
+                    fused_scores[item.evidence_id] += matched_count * 5.0 * type_mult
+
+        # 5. Context Expansion for tables
         # If a table_cell or row was retrieved, ensure its parent table context is included
         # and attach metadata if not already attached
         ranked_ev_ids = sorted(fused_scores.keys(), key=lambda eid: fused_scores[eid], reverse=True)

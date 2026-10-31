@@ -20,10 +20,10 @@ def run_command(args: argparse.Namespace) -> None:
         print(f"Error: Questions file '{questions_path}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Parsing and indexing PDF: {pdf_path.name}...")
+    print(f"Parsing and indexing PDF: {pdf_path.name}...", flush=True)
     registry = get_registry()
     doc = registry.register_file(pdf_path, pdf_path.name)
-    print(f"Document registered: {doc.document_id} ({doc.page_count} pages)")
+    print(f"Document registered: {doc.document_id} ({doc.page_count} pages)", flush=True)
 
     qa = QAService(registry)
 
@@ -31,7 +31,7 @@ def run_command(args: argparse.Namespace) -> None:
     with open(questions_path, "r", encoding="utf-8") as f:
         questions = [json.loads(line) for line in f if line.strip()]
 
-    print(f"Processing {len(questions)} questions...")
+    print(f"Processing {len(questions)} questions...", flush=True)
     results = []
     start_t = time.time()
 
@@ -69,10 +69,10 @@ def benchmark_command(args: argparse.Namespace) -> None:
         print(f"Error: Benchmark questions file '{questions_path}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Parsing and indexing PDF: {pdf_path.name}...")
+    print(f"Parsing and indexing PDF: {pdf_path.name}...", flush=True)
     registry = get_registry()
     doc = registry.register_file(pdf_path, pdf_path.name)
-    print(f"Document registered: {doc.document_id} ({doc.page_count} pages)")
+    print(f"Document registered: {doc.document_id} ({doc.page_count} pages)", flush=True)
 
     qa = QAService(registry)
 
@@ -80,7 +80,7 @@ def benchmark_command(args: argparse.Namespace) -> None:
         gold_questions = [json.loads(line) for line in f if line.strip()]
 
     total = len(gold_questions)
-    print(f"Running benchmark on {total} questions...")
+    print(f"Running benchmark on {total} questions...", flush=True)
 
     correct_answers = 0
     page_hits = 0
@@ -101,9 +101,9 @@ def benchmark_command(args: argparse.Namespace) -> None:
 
     start_t = time.time()
 
-    print("\n" + "=" * 90)
-    print(f"{'ID':<6} | {'PREDICTED':<12} | {'GOLD':<12} | {'PRED_P':<6} | {'GOLD_PAGES':<16} | {'STATUS'}")
-    print("=" * 90)
+    print("\n" + "=" * 90, flush=True)
+    print(f"{'ID':<6} | {'PREDICTED':<12} | {'GOLD':<12} | {'PRED_P':<6} | {'GOLD_PAGES':<16} | {'STATUS'}", flush=True)
+    print("=" * 90, flush=True)
 
     for q in gold_questions:
         q_id = q.get("id")
@@ -150,7 +150,7 @@ def benchmark_command(args: argparse.Namespace) -> None:
                 error_sources["entity_not_found"] += 1
 
         pages_str = str(gold_pages[:3]) if len(gold_pages) <= 3 else f"{gold_pages[:3]}+"
-        print(f"{q_id:<6} | {pred_ans:<12} | {gold_ans:<12} | {str(pred_page):<6} | {pages_str:<16} | {status_label}")
+        print(f"{q_id:<6} | {pred_ans:<12} | {gold_ans:<12} | {str(pred_page):<6} | {pages_str:<16} | {status_label}", flush=True)
 
     elapsed = time.time() - start_t
     accuracy = (correct_answers / total) * 100.0

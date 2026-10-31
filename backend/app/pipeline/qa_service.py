@@ -71,23 +71,45 @@ class QAService:
         elif any(w in q_lower for w in ["accident", "accidents", "crashes"]):
             measures.append("accidents")
 
-        # 3. Target Entities
-        # Look for prepositional phrases: "in X city", "in X state", "in X", "for X", "of X"
+        # 3. Target Entities & Geographic Subjects
         entities: list[str] = []
+
+        # Parentheses: extract aliases like (Prayagraj) while ignoring descriptor phrases
+        for p in re.findall(r"\(([^)]+)\)", question):
+            if "million" not in p.lower() and len(p.strip()) > 2:
+                entities.append(p.strip())
+
+        # Clean "in road accidents in " -> "in " so the city/state matches reliably
+        q_norm = re.sub(r"\bin\s+road\s+accidents\s+(?:in\s+)?", "in ", question, flags=re.IGNORECASE)
+        q_norm = re.sub(r"\([^)]*\)", "", q_norm)
 
         # Quoted strings e.g. 'Run off Road', 'Others'
         quotes = re.findall(r"['\"]([^'\"]+)['\"]", question)
         for q in quotes:
             entities.append(q.strip())
 
-        # Patterns like: "in <Entity> (million-plus city)" or "in <Entity> city" or "in <Entity> in"
-        m_city = re.search(r"\bin\s+([A-Za-z\s\-]+?)\s+(?:\(million-plus city\)|city|state|during|in\s+20|\?)", question, re.IGNORECASE)
-        if m_city:
-            ent = m_city.group(1).strip()
-            # Clean common words
-            ent_clean = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed)\b", "", ent, flags=re.IGNORECASE).strip()
+        # Prepositional entity: "in <Entity>"
+        m_in = re.search(r"\bin\s+([A-Za-z\s\-]+?)(?:\s+(?:city|state|during|in\s+20\d\d|\?)|$)", q_norm, re.IGNORECASE)
+        if m_in:
+            ent = m_in.group(1).strip()
+            ent_clean = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed|reported|occurred|million|plus)\b", "", ent, flags=re.IGNORECASE).strip()
             if ent_clean and len(ent_clean) > 2 and ent_clean.lower() not in ("the", "which", "what"):
                 entities.append(ent_clean)
+
+        # "due to <Cause>", "caused by <Cause>", "without wearing <Item>", "not wearing <Item>"
+        m_cause = re.search(r"\b(?:due to|caused by|from not wearing|without wearing)\s+([A-Za-z\s\-]+?)(?:\s+(?:in|during|\?)|$)", q_norm, re.IGNORECASE)
+        if m_cause:
+            c_val = m_cause.group(1).strip()
+            c_clean = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed)\b", "", c_val, flags=re.IGNORECASE).strip()
+            if len(c_clean) > 2:
+                entities.append(c_clean)
+
+        # Collision types e.g. "how many hit from back road accidents"
+        m_coll = re.search(r"\bhow many\s+([A-Za-z\s\-]+?)\s+road accidents", question, re.IGNORECASE)
+        if m_coll:
+            c_type = m_coll.group(1).strip()
+            if c_type.lower() not in ("the", "which", "what", "total"):
+                entities.append(c_type)
 
         # "involved <Entity>"
         m_inv = re.search(r"\binvolved\s+([A-Za-z\s\-]+?)(?:\?|$)", question, re.IGNORECASE)
@@ -96,20 +118,13 @@ class QAService:
             if len(ent) > 2:
                 entities.append(ent)
 
-        # "how many <Entity> were reported/occurred"
-        m_hm = re.search(r"\bhow many\s+([A-Za-z\s\-]+?)\s+(?:were reported|occurred|were killed|were injured|in\s+20|\?)", question, re.IGNORECASE)
-        if m_hm:
-            ent = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed|injury|injured)\b", "", m_hm.group(1), flags=re.IGNORECASE).strip()
-            if len(ent) > 2 and ent.lower() not in ("the", "which", "what"):
-                entities.append(ent)
-
-        # Road user types e.g. "two-wheeler", "pedestrian", "car", "bicycle", "truck", "bus"
-        user_types = ["two-wheeler", "two-wheelers", "two wheeler", "two wheelers", "pedestrian", "pedestrians", "bicycle", "bicycles", "cyclist", "auto rickshaw", "car", "cars", "truck", "trucks", "bus", "buses"]
+        # Road user types e.g. "two-wheeler", "pedestrian", "car", "bicycle", "truck", "bus", "helmet"
+        user_types = ["two-wheeler", "two-wheelers", "two wheeler", "two wheelers", "pedestrian", "pedestrians", "bicycle", "bicycles", "cyclist", "auto rickshaw", "car", "cars", "truck", "trucks", "bus", "buses", "helmet", "helmets"]
         for ut in user_types:
             if re.search(rf"\b{re.escape(ut)}\b", q_lower):
                 entities.append(ut)
 
-        # Collision types e.g. "hit from back", "head on", "hit from side"
+        # Collision terms e.g. "hit from back", "head on", "hit from side"
         collision_terms = ["hit from back", "head on", "hit from side", "run off road", "skidding", "overturning"]
         for ct in collision_terms:
             if ct in q_lower:
@@ -145,24 +160,35 @@ class QAService:
 
         # Retrieve candidate evidence using indexed registry retriever
         classification = self.classifier.classify(question)
-        candidates = list(self.registry.retriever.retrieve(question, [document_id], top_k=25))
+        candidates = list(self.registry.retriever.retrieve(question, [document_id], top_k=25, entities=entities))
 
-        # 1. Groq Reasoning Path (if configured)
+        # Check if query specifically targets entities that do not exist anywhere in document
+        if entities:
+            # If none of the candidate items contain the entity, check if entity exists anywhere in document
+            has_entity_in_candidates = any(any(e.lower() in c.text.lower() for e in entities) for c in candidates)
+            if not has_entity_in_candidates:
+                # Entity absent from candidates
+                return "NOT_FOUND", None, 0.95
+
+        # 1. Deterministic Grounded Extraction Path (checks exact table cells/rows matching entity + metric + period)
+        det_res = self._deterministic_extract(question, candidates, entities, measures, target_period)
+        if det_res:
+            ans, page, conf = det_res
+            return ans, page, conf
+
+        # 2. Groq Reasoning Path (if configured, interprets question or narrative candidates)
         if self.groq_api_key and len(self.groq_api_key) > 10:
             groq_res = self._ask_groq(question, candidates, entities, measures, periods)
             if groq_res:
                 ans, page, conf = groq_res
-                # Validate that integer actually exists in candidates on that page
-                if ans != "NOT_FOUND" and self._validate_evidence_claim(ans, page, candidates):
+                # Validate that integer actually exists in candidates on that page and matches entity
+                if ans != "NOT_FOUND" and self._validate_evidence_claim(ans, page, candidates, entities, measures):
                     return ans, page, conf
-
-        # 2. Deterministic Fallback Path
-        det_res = self._deterministic_extract(question, candidates, entities, measures, target_period)
-        if det_res:
-            return det_res
+                elif ans == "NOT_FOUND":
+                    return "NOT_FOUND", None, conf
 
         # If nothing matched with high confidence, abstain
-        return "NOT_FOUND", None, 0.85
+        return "NOT_FOUND", None, 0.90
 
     def _ask_groq(
         self,
@@ -177,7 +203,7 @@ class QAService:
         """
         evidence_snippets = []
         for idx, ev in enumerate(candidates[:8]):
-            p_num = ev.pdf_page_index + 1
+            p_num = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
             evidence_snippets.append(f"[{idx+1}] Page {p_num} ({ev.kind}): {ev.text}")
         context_str = "\n\n".join(evidence_snippets)
 
@@ -229,14 +255,27 @@ class QAService:
 
         return None
 
-    def _validate_evidence_claim(self, answer: str, page: int | None, candidates: list[EvidenceItem]) -> bool:
+    def _validate_evidence_claim(
+        self,
+        answer: str,
+        page: int | None,
+        candidates: list[EvidenceItem],
+        entities: list[str] | None = None,
+        measures: list[str] | None = None,
+    ) -> bool:
         """Zero-hallucination validator: claims must literally exist in candidate evidence on that page."""
         if not answer or not page:
             return False
         for ev in candidates:
-            if (ev.pdf_page_index + 1) == page:
-                clean_text = ev.text.replace(",", "")
-                if answer in clean_text:
+            ev_page = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
+            if ev_page == page:
+                clean_text = ev.text.replace(",", "").lower()
+                # If entities were specified, evidence on that page must mention at least one entity
+                if entities:
+                    if not any(e.lower() in clean_text for e in entities):
+                        continue
+                # Must match as a whole token/number
+                if re.search(rf"\b{re.escape(answer.lower())}\b", clean_text):
                     return True
         return False
 
@@ -250,75 +289,100 @@ class QAService:
     ) -> tuple[str, int | None, float] | None:
         """
         Pure deterministic table and row extractor:
-        Matches entity against table rows, column against measure + period, extracts unformatted integer.
+        Finds the global best matching cell across all candidates by entity, measure, period, and category.
         """
-        # Priority 1: Table cells with structured row data
+        vehicle_and_cause_terms = {
+            "two-wheeler", "two wheelers", "two wheeler", "two-wheelers", "pedestrian", "pedestrians",
+            "bicycle", "bicycles", "car", "cars", "truck", "trucks", "bus", "buses",
+            "jumping red light", "over speeding", "helmet", "helmets", "hit from back"
+        }
+        primary_entities = [e for e in entities if e.lower() not in vehicle_and_cause_terms]
+        q_lower = question.lower()
+
+        best_match = None
+        best_score = -1
+
         for ev in candidates:
             if ev.kind == "table_cell" and "headers" in ev.metadata and "row_values" in ev.metadata:
                 headers: list[str] = ev.metadata.get("headers", [])
                 row_vals: list[str] = ev.metadata.get("row_values", [])
                 page_num = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
-
-                # Check if entity matches this row
                 row_text = ev.text.lower()
-                entity_matched = False
-                if entities:
-                    for ent in entities:
-                        if ent.lower() in row_text:
-                            entity_matched = True
-                            break
+
+                # Match primary geographic entity
+                if primary_entities:
+                    if not any(pe.lower() in row_text for pe in primary_entities):
+                        continue
+                elif entities:
+                    if not any(e.lower() in row_text for e in entities):
+                        continue
                 else:
-                    entity_matched = True
+                    # National query: check for total row
+                    if not ("total" in row_text or "all india" in row_text or target_period in row_text):
+                        continue
 
-                if entity_matched:
-                    # Find matching column by measure and period
-                    best_col_idx = -1
-                    best_col_score = -1
+                has_requested_category = any(c in " ".join(entities).lower() for c in vehicle_and_cause_terms)
 
-                    for c_idx, h in enumerate(headers):
-                        h_lower = h.lower()
-                        score = 0
-                        # Check period
-                        if target_period in h_lower:
-                            score += 2
-                        elif any(yr in h_lower for yr in ["2022", "2021", "2020"]):
-                            # Wrong year
-                            continue
+                for c_idx, h in enumerate(headers):
+                    h_lower = h.lower()
+                    s = 0
 
-                        # Check measure
-                        if measures:
-                            for m in measures:
-                                syns = self.METRIC_SYNONYMS.get(m, [m])
-                                if any(s in h_lower for s in syns):
-                                    score += 3
-                        else:
-                            # General total or count
-                            if any(w in h_lower for w in ["total", "numbers", "in numbers"]):
-                                score += 1
+                    # Period match
+                    if target_period in h_lower:
+                        s += 3
+                    elif any(yr in h_lower for yr in ["2022", "2021", "2020", "2019", "2018"]):
+                        continue
 
-                        # Check category / road-user match in column header (e.g. "two-wheeler", "pedestrian", "bicycle")
+                    # Measure match
+                    if measures:
+                        for m in measures:
+                            syns = self.METRIC_SYNONYMS.get(m, [m])
+                            if any(syn in h_lower for syn in syns):
+                                s += 4
+                    else:
+                        if any(w in h_lower for w in ["total", "in numbers", "innumbers", "number of road accidents"]):
+                            s += 2
+
+                    # Penalize highway-specific tables when question did not ask for highway
+                    if any(hw in h_lower for hw in ["state highways", "national highways", "expressway"]) and "highway" not in q_lower:
+                        s -= 6
+
+                    # Category / Cause / Vehicle matching
+                    if has_requested_category:
+                        matched_req = False
                         for ent in entities:
                             clean_ent = ent.lower().replace("-", " ")
-                            if any(w in clean_ent for w in ["two wheeler", "two-wheeler", "pedestrian", "bicycle", "car", "bus", "truck"]):
-                                if any(tok in h_lower.replace("-", " ") for tok in clean_ent.split() if len(tok) > 3):
-                                    score += 4
+                            for cat in vehicle_and_cause_terms:
+                                if cat in clean_ent:
+                                    if any(tok in h_lower.replace("-", " ") for tok in cat.split() if len(tok) > 3):
+                                        s += 6
+                                        matched_req = True
+                                        break
+                        if not matched_req:
+                            s -= 4
+                    else:
+                        # Penalize unrequested sub-categories
+                        if any(sub in h_lower for sub in ["bus", "buses", "bicycle", "pedestrian", "two wheeler", "two-wheeler", "truck", "e-rickshaw", "junction", "weather", "rule", "signal", "speeding", "helmet"]):
+                            s -= 5
+                        elif any(tot in h_lower for tot in ["total", "in numbers", "innumbers", "number of persons", "number of road accidents"]):
+                            s += 2
 
-                        # Penalize ranking columns if looking for counts/deaths/accidents
-                        if "ranking" in h_lower or "share" in h_lower:
-                            score -= 2
+                    # Ranking penalty
+                    if ("ranking" in h_lower or "share" in h_lower) and "ranking" not in measures:
+                        s -= 4
 
-                        if score > best_col_score and c_idx < len(row_vals):
-                            best_col_score = score
-                            best_col_idx = c_idx
-
-                    if best_col_idx >= 0 and best_col_score > 0:
-                        raw_val = row_vals[best_col_idx]
+                    if s > best_score and c_idx < len(row_vals):
+                        raw_val = row_vals[c_idx]
                         clean_int = self._clean_integer(raw_val)
                         if clean_int:
-                            confidence = min(0.98, 0.65 + (0.15 if entity_matched else 0.0) + (0.10 if best_col_score >= 3 else 0.0))
-                            return clean_int, page_num, confidence
+                            best_score = s
+                            conf = min(0.98, 0.70 + 0.05 * min(5, s))
+                            best_match = (clean_int, page_num, conf)
 
-        # Priority 2: Full markdown tables
+        if best_match and best_score >= 3:
+            return best_match
+
+        # Priority 2: Full markdown tables for national totals or summary views
         for ev in candidates:
             if ev.kind == "table" or "|" in ev.text:
                 page_num = ev.metadata.get("start_page") or (ev.pdf_page_index + 1)
@@ -329,16 +393,14 @@ class QAService:
                         if "---" in row_line:
                             continue
                         r_lower = row_line.lower()
-                        # Check entity match
-                        if entities and not any(ent.lower() in r_lower for ent in entities):
+                        if primary_entities and not any(pe.lower() in r_lower for pe in primary_entities):
                             continue
                         cells = [c.strip() for c in row_line.strip("|").split("|")]
-                        # Find column matching measure & period
                         for c_idx, cell in enumerate(cells):
                             h_name = headers[c_idx] if c_idx < len(headers) else ""
-                            if (not target_period or target_period in h_name or target_period in r_lower):
+                            if (not target_period or target_period in h_name):
                                 clean_int = self._clean_integer(cell)
-                                if clean_int:
+                                if clean_int and len(clean_int) >= 2:
                                     return clean_int, page_num, 0.88
 
         return None

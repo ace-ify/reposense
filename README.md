@@ -1,8 +1,8 @@
-# Report Intelligence Assistant
+# Report Navigator
 
-> **Evidence-first Question Answering & Verification Engine for Complex Statistical and Financial Reports.**
+> **Evidence-first Question Answering & Verification Engine for Long Government Statistics Reports.**
 
-[![Tests](https://img.shields.io/badge/tests-13%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-15%20passed-brightgreen.svg)]()
 [![Benchmark Accuracy](https://img.shields.io/badge/eval%20scorecard-100%25-brightgreen.svg)]()
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.13-blue.svg)]()
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg)]()
@@ -12,7 +12,7 @@
 
 ## 🏆 Key Innovations (Why this wins hackathons)
 
-Most standard RAG pipelines fail catastrophically on statistical and financial reports because:
+Most standard RAG pipelines fail catastrophically on government statistics reports because:
 1. **They flatten tables into raw text**, destroying row/column relationships and multi-level header paths.
 2. **They let LLMs estimate arithmetic**, hallucinating growth rates, percentage changes, and totals.
 3. **They cite vague or inaccurate page numbers**, confusing zero-based PDF page indexes with printed page labels.
