@@ -84,37 +84,40 @@ class PyMuPDFDocumentParser(DocumentParser):
             page_labels = []
 
         last_table_start_page = 1
+        ocr_count = 0
 
-        for p_idx in range(page_count):
-            page = doc[p_idx]
-            rect = page.rect
-            width = float(rect.width) if rect.width > 0 else 1.0
-            height = float(rect.height) if rect.height > 0 else 1.0
-            rotation = int(page.rotation)
+        try:
+            for p_idx in range(page_count):
+                page = doc[p_idx]
+                rect = page.rect
+                width = float(rect.width) if rect.width > 0 else 1.0
+                height = float(rect.height) if rect.height > 0 else 1.0
+                rotation = int(page.rotation)
 
-            printed_label = None
-            if page_labels and p_idx < len(page_labels) and page_labels[p_idx]:
-                printed_label = page_labels[p_idx]
-            else:
-                printed_label = str(p_idx + 1)
+                printed_label = None
+                if page_labels and p_idx < len(page_labels) and page_labels[p_idx]:
+                    printed_label = page_labels[p_idx]
+                else:
+                    printed_label = str(p_idx + 1)
 
-            page_warnings: list[str] = []
-            tables_on_page: list[pymupdf.Table] = []
-            table_rects: list[pymupdf.Rect] = []
+                page_warnings: list[str] = []
+                tables_on_page: list[pymupdf.Table] = []
+                table_rects: list[pymupdf.Rect] = []
 
-            # 1. Extract structured tables using page.find_tables()
-            try:
-                table_tab = page.find_tables()
-                if table_tab and table_tab.tables:
-                    tables_on_page = table_tab.tables
-            except Exception as e:
-                page_warnings.append(f"Table extraction error on page {p_idx}: {e}")
+                # 1. Extract structured tables using page.find_tables(use_layout=False)
+                # Disabling ONNX neural net layout analysis prevents multi-minute freezes and OOM crashes
+                try:
+                    table_tab = page.find_tables(use_layout=False)
+                    if table_tab and table_tab.tables:
+                        tables_on_page = table_tab.tables
+                except Exception as e:
+                    page_warnings.append(f"Table extraction error on page {p_idx}: {e}")
 
-            page_table_count = 0
-            for tbl in tables_on_page:
-                page_table_count += 1
-                tbl_id = f"tbl_{document_id}_p{p_idx}_{page_table_count}"
-                table_rects.append(tbl.bbox)
+                page_table_count = 0
+                for tbl in tables_on_page:
+                    page_table_count += 1
+                    tbl_id = f"tbl_{document_id}_p{p_idx}_{page_table_count}"
+                    table_rects.append(pymupdf.Rect(tbl.bbox))
 
                 # Normalized bounding box
                 t_bbox = BoundingBox(
@@ -325,8 +328,8 @@ class PyMuPDFDocumentParser(DocumentParser):
 
                 # Check if block overlaps significantly with any table
                 overlaps_table = False
-                for tbl_bbox in table_rects:
-                    intersect = b_rect & pymupdf.Rect(tbl_bbox)
+                for tbl_rect in table_rects:
+                    intersect = b_rect & tbl_rect
                     if intersect.get_area() > 0.4 * b_rect.get_area():
                         overlaps_table = True
                         break
@@ -408,40 +411,45 @@ class PyMuPDFDocumentParser(DocumentParser):
             if not has_text:
                 extraction_method = "ocr"
                 ocr_succeeded = False
-                try:
-                    tp = page.get_textpage_ocr(dpi=150)
-                    ocr_blocks = tp.extractBLOCKS()
-                    if ocr_blocks:
-                        for b in ocr_blocks:
-                            raw_b = str(b[4]).strip()
-                            if not raw_b:
-                                continue
-                            narrative_count += 1
-                            ev_id = f"ev_ocr_{document_id}_p{p_idx}_{narrative_count}"
-                            b_bbox = BoundingBox(
-                                x0=max(0.0, min(1.0, float(b[0]) / width)),
-                                y0=max(0.0, min(1.0, float(b[1]) / height)),
-                                x1=max(0.0, min(1.0, float(b[2]) / width)),
-                                y1=max(0.0, min(1.0, float(b[3]) / height)),
-                            )
-                            evidence_items.append(
-                                EvidenceItem(
-                                    evidence_id=ev_id,
-                                    document_id=document_id,
-                                    pdf_page_index=p_idx,
-                                    printed_page_number=printed_label,
-                                    kind="paragraph",
-                                    text=raw_b,
-                                    normalized_text=self._normalize_text(raw_b),
-                                    bbox=b_bbox,
-                                    metadata={"source": "ocr", "line_count": len(raw_b.splitlines())},
-                                    extraction_confidence=0.88,
-                                    warnings=["Extracted via selective OCR."],
+                # Limit selective OCR to at most 2 pages and use 72 DPI to prevent gateway timeouts and OOM kills on fresh instances
+                if ocr_count < 2:
+                    try:
+                        tp = page.get_textpage_ocr(dpi=72)
+                        ocr_blocks = tp.extractBLOCKS()
+                        if ocr_blocks:
+                            for b in ocr_blocks:
+                                raw_b = str(b[4]).strip()
+                                if not raw_b:
+                                    continue
+                                narrative_count += 1
+                                ev_id = f"ev_ocr_{document_id}_p{p_idx}_{narrative_count}"
+                                b_bbox = BoundingBox(
+                                    x0=max(0.0, min(1.0, float(b[0]) / width)),
+                                    y0=max(0.0, min(1.0, float(b[1]) / height)),
+                                    x1=max(0.0, min(1.0, float(b[2]) / width)),
+                                    y1=max(0.0, min(1.0, float(b[3]) / height)),
                                 )
-                            )
-                        ocr_succeeded = True
-                except Exception as e:
-                    page_warnings.append(f"Page requires OCR; local OCR fallback attempted: {e}")
+                                evidence_items.append(
+                                    EvidenceItem(
+                                        evidence_id=ev_id,
+                                        document_id=document_id,
+                                        pdf_page_index=p_idx,
+                                        printed_page_number=printed_label,
+                                        kind="paragraph",
+                                        text=raw_b,
+                                        normalized_text=self._normalize_text(raw_b),
+                                        bbox=b_bbox,
+                                        metadata={"source": "ocr", "line_count": len(raw_b.splitlines())},
+                                        extraction_confidence=0.88,
+                                        warnings=["Extracted via selective OCR."],
+                                    )
+                                )
+                            ocr_succeeded = True
+                            ocr_count += 1
+                    except Exception as e:
+                        page_warnings.append(f"Page requires OCR; local OCR fallback attempted: {e}")
+                else:
+                    page_warnings.append("No native text found on page; page requires OCR inspection.")
 
                 if not ocr_succeeded and not page_warnings:
                     page_warnings.append("No native text found on page; page requires OCR inspection.")
@@ -458,6 +466,8 @@ class PyMuPDFDocumentParser(DocumentParser):
                     warnings=page_warnings,
                 )
             )
+        finally:
+            doc.close()
 
         doc_item = DocumentItem(
             document_id=document_id,
