@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import {
   ArrowLeft,
   Share2,
@@ -6,13 +6,10 @@ import {
   Download,
   MoreHorizontal,
   ChevronRight,
-  ChevronDown,
   BarChart2,
   FileText,
   Search,
   ArrowRight,
-  CheckCircle2,
-  AlertTriangle,
   ExternalLink,
   ShieldCheck,
   Calculator,
@@ -23,6 +20,9 @@ import {
   X,
   FileSpreadsheet,
   CornerDownRight,
+  Loader2,
+  Save,
+  Trash2,
 } from "lucide-react";
 import {
   AnswerResponse,
@@ -38,6 +38,8 @@ import { TableExplorer } from "./TableExplorer";
 interface ReportWorkspaceProps {
   document: DocumentItem | null;
   evidenceData: DocumentEvidenceData | null;
+  isLoadingEvidence?: boolean;
+  evidenceError?: string | null;
   suggestions: Array<{ label: string; question: string; category?: string; intent?: string }>;
   answerData: AnswerResponse | null;
   targetPageIndex: number;
@@ -53,6 +55,8 @@ interface ReportWorkspaceProps {
 export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
   document,
   evidenceData,
+  isLoadingEvidence = false,
+  evidenceError = null,
   suggestions,
   answerData,
   targetPageIndex,
@@ -71,9 +75,37 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
   const [inputQuestion, setInputQuestion] = useState<string>("");
   const [actionFeedback, setActionFeedback] = useState<string | null>(null);
 
+  // Real local storage note editor
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState<boolean>(false);
+  const [noteContent, setNoteContent] = useState<string>("");
+
+  useEffect(() => {
+    if (document) {
+      const savedNote = localStorage.getItem(`report_notes_${document.document_id}`) || "";
+      setNoteContent(savedNote);
+    } else {
+      setNoteContent("");
+    }
+  }, [document?.document_id]);
+
+  const handleSaveNote = () => {
+    if (!document) return;
+    localStorage.setItem(`report_notes_${document.document_id}`, noteContent);
+    setIsNoteModalOpen(false);
+    showFeedback("Note saved to browser storage.");
+  };
+
+  const handleDeleteNote = () => {
+    if (!document) return;
+    localStorage.removeItem(`report_notes_${document.document_id}`);
+    setNoteContent("");
+    setIsNoteModalOpen(false);
+    showFeedback("Note removed from browser storage.");
+  };
+
   const showFeedback = (msg: string) => {
     setActionFeedback(msg);
-    setTimeout(() => setActionFeedback(null), 3000);
+    setTimeout(() => setActionFeedback(null), 3500);
   };
 
   const handleQuestionSubmit = (e: React.FormEvent) => {
@@ -82,7 +114,21 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
     onAskQuestion(inputQuestion.trim());
   };
 
-  // Build outline items from live evidence data
+  const handleShare = () => {
+    if (!document) return;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?doc=${encodeURIComponent(document.document_id)}`;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(shareUrl).then(() => {
+        showFeedback(`Link copied: reopens ${document.filename}`);
+      }).catch(() => {
+        showFeedback(`Share URL: ${shareUrl}`);
+      });
+    } else {
+      showFeedback(`Share URL: ${shareUrl}`);
+    }
+  };
+
+  // Build outline items dynamically from live evidence data
   const outlineItems = useMemo(() => {
     if (!evidenceData) return [];
 
@@ -118,7 +164,6 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
       });
     });
 
-    // Sort by page index ascending
     return items.sort((a, b) => a.pageIndex - b.pageIndex);
   }, [evidenceData]);
 
@@ -149,13 +194,129 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
     };
   }, [answerData, document]);
 
+  // Derived Grounding Status strictly from answer status, citations, and verification checks
+  const groundingStatus = useMemo(() => {
+    if (!answerData) return null;
+
+    if (answerData.status === "not_found") {
+      return {
+        label: "Not found in report (honest refusal)",
+        className: "abstention",
+        dotColor: "dot-amber",
+      };
+    }
+    if (answerData.status === "ambiguous") {
+      return {
+        label: "Ambiguous query result",
+        className: "abstention",
+        dotColor: "dot-amber",
+      };
+    }
+    if (answerData.status === "conflicting") {
+      return {
+        label: "Conflicting evidence in report",
+        className: "abstention",
+        dotColor: "dot-amber",
+      };
+    }
+
+    const checks = answerData.verification_checks || [];
+    if (checks.length > 0) {
+      const passedCount = checks.filter((c) => c.passed).length;
+      const totalCount = checks.length;
+      if (passedCount === totalCount) {
+        return {
+          label: `Grounding verified (${passedCount}/${totalCount} checks passed)`,
+          className: "high",
+          dotColor: "dot-green",
+        };
+      } else {
+        const failedCount = totalCount - passedCount;
+        return {
+          label: `Verification flagged (${failedCount} check${failedCount > 1 ? "s" : ""} failed)`,
+          className: "flagged",
+          dotColor: "dot-amber",
+        };
+      }
+    }
+
+    // Neutral wording when no verification checks returned by API
+    if (answerData.citations && answerData.citations.length > 0) {
+      return {
+        label: `Evidence cited (${answerData.citations.length} source${answerData.citations.length > 1 ? "s" : ""})`,
+        className: "neutral",
+        dotColor: "dot-green",
+      };
+    }
+
+    return {
+      label: "Unreferenced response",
+      className: "unreferenced",
+      dotColor: "dot-amber",
+    };
+  }, [answerData]);
+
   return (
     <div className="workspace-shell">
-      {/* ACTION TOAST FEEDBACK */}
+      {/* FLOATING ACTION TOAST */}
       {actionFeedback && (
         <div className="floating-action-toast">
           <Info size={14} />
           <span>{actionFeedback}</span>
+        </div>
+      )}
+
+      {/* REAL NOTE MODAL */}
+      {isNoteModalOpen && (
+        <div className="note-modal-backdrop" onClick={() => setIsNoteModalOpen(false)}>
+          <div className="note-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="note-modal-header">
+              <div className="note-modal-title">
+                <FileEdit size={16} />
+                <span>Research Notes · {document?.filename}</span>
+              </div>
+              <button
+                type="button"
+                className="btn-panel-toggle"
+                onClick={() => setIsNoteModalOpen(false)}
+              >
+                ✕
+              </button>
+            </div>
+            <div className="note-modal-body">
+              <textarea
+                className="note-textarea"
+                placeholder="Write observations, notes, or findings about this report (persisted in browser storage)..."
+                value={noteContent}
+                onChange={(e) => setNoteContent(e.target.value)}
+                rows={8}
+              />
+              <div className="note-storage-hint">
+                Notes are persisted in local browser storage for document ID: <code>{document?.document_id}</code>.
+              </div>
+            </div>
+            <div className="note-modal-actions">
+              {noteContent && (
+                <button type="button" className="btn-note-delete" onClick={handleDeleteNote}>
+                  <Trash2 size={13} />
+                  <span>Clear Note</span>
+                </button>
+              )}
+              <div style={{ display: "flex", gap: "8px", marginLeft: "auto" }}>
+                <button
+                  type="button"
+                  className="btn-text-action"
+                  onClick={() => setIsNoteModalOpen(false)}
+                >
+                  Cancel
+                </button>
+                <button type="button" className="btn-primary-cobalt" onClick={handleSaveNote}>
+                  <Save size={13} />
+                  <span>Save Note</span>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
@@ -179,11 +340,13 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
               </span>
               <span className="doc-status-pill">
                 <span className={`status-dot ${isIndexed ? "dot-green" : "dot-amber"}`} />
-                <span className="status-label">{isIndexed ? "Indexed" : "Processing"}</span>
+                <span className="status-label">
+                  {document?.processing_status || (isIndexed ? "ready" : "processing")}
+                </span>
               </span>
             </div>
             <div className="doc-meta-row">
-              {document?.page_count || 1} pages · Evidence extracted · Normalized coordinates
+              {document ? `${document.page_count} pages · Status: ${document.processing_status}` : ""}
             </div>
           </div>
         </div>
@@ -193,11 +356,8 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
           <button
             type="button"
             className="workspace-action-btn"
-            onClick={() => {
-              navigator.clipboard?.writeText(window.location.href);
-              showFeedback("Report link copied to clipboard");
-            }}
-            title="Share report link"
+            onClick={handleShare}
+            title="Copy link to reopen this report"
           >
             <Share2 size={14} />
             <span>Share</span>
@@ -206,11 +366,11 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
           <button
             type="button"
             className="workspace-action-btn"
-            onClick={() => showFeedback("Notes drawer saved to local session")}
-            title="Add research note"
+            onClick={() => setIsNoteModalOpen(true)}
+            title="Open research notes (persisted in local browser storage)"
           >
             <FileEdit size={14} />
-            <span>Add note</span>
+            <span>{noteContent ? "View note" : "Add note"}</span>
           </button>
 
           {document && (
@@ -224,15 +384,6 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
               <span>Download</span>
             </a>
           )}
-
-          <button
-            type="button"
-            className="workspace-action-btn icon-only"
-            onClick={() => showFeedback("Document registered in active in-memory and disk cache.")}
-            title="More options"
-          >
-            <MoreHorizontal size={15} />
-          </button>
         </div>
       </header>
 
@@ -268,12 +419,21 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
           </div>
 
           <div className="panel-scroll-content">
-            {leftNavTab === "outline" ? (
+            {isLoadingEvidence ? (
+              <div className="outline-empty-state">
+                <Loader2 size={20} className="spinner-icon" />
+                <span style={{ marginTop: "8px", fontSize: "12px" }}>Loading outline...</span>
+              </div>
+            ) : evidenceError ? (
+              <div className="outline-empty-state">
+                <span style={{ color: "var(--color-rose)", fontSize: "12px" }}>{evidenceError}</span>
+              </div>
+            ) : leftNavTab === "outline" ? (
               <div className="outline-tree">
                 {outlineItems.length === 0 ? (
                   <div className="outline-empty-state">
                     <Layers size={24} className="empty-glyph" />
-                    <span>Extracting document outline...</span>
+                    <span>No headings or tables found in evidence</span>
                   </div>
                 ) : (
                   outlineItems.map((item) => {
@@ -369,12 +529,12 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
               </div>
             </form>
 
-            {/* Quick Suggestions / Sample Questions */}
+            {/* Suggestions / Sample Questions */}
             {suggestions.length > 0 && (
               <div className="quick-suggestions-block">
                 <div className="suggestions-header">
                   <Sparkles size={12} className="sparkle-icon" />
-                  <span>SUGGESTED QUESTIONS</span>
+                  <span>SUGGESTED INQUIRIES</span>
                 </div>
                 <div className="suggestions-list">
                   {suggestions.slice(0, 3).map((s, idx) => (
@@ -421,25 +581,20 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
                   {answerData.claims[0]?.text ||
                     (answerData.status === "not_found"
                       ? "The requested statistic was not found in the verified text or tables of this report."
-                      : "Direct extraction from verified report citations.")}
+                      : "Direct extraction from report evidence.")}
                 </div>
 
-                {/* Grounding Match Badge */}
-                <div className="evidence-match-badge-row">
-                  {answerData.status === "not_found" ? (
-                    <span className="match-pill abstention">
-                      <span className="pill-dot dot-amber" />
-                      <span>Honest Abstention: not found in report</span>
+                {/* Truthful Grounding Match Badge */}
+                {groundingStatus && (
+                  <div className="evidence-match-badge-row">
+                    <span className={`match-pill ${groundingStatus.className}`}>
+                      <span className={`pill-dot ${groundingStatus.dotColor}`} />
+                      <span>{groundingStatus.label}</span>
                     </span>
-                  ) : (
-                    <span className="match-pill high">
-                      <span className="pill-dot dot-green" />
-                      <span>Evidence match: high (verified grounding)</span>
-                    </span>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                {/* Primary Citation Card */}
+                {/* Citations List */}
                 {answerData.citations.length > 0 && (
                   <div className="citations-list-group">
                     <div className="citations-group-title">CITATIONS</div>
@@ -584,7 +739,7 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
                       <div className="direct-lookup-method">
                         <div className="method-title">Direct Hybrid Retrieval</div>
                         <p className="method-desc">
-                          Retrieved via BM25 lexical ranking and semantic embeddings fused via Reciprocal Rank Fusion (RRF). Parent table context expanded automatically.
+                          Retrieved via lexical BM25 ranking and semantic vector representations with Reciprocal Rank Fusion (RRF).
                         </p>
                       </div>
                     )}
@@ -617,7 +772,9 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
                           </div>
                         ))
                       ) : (
-                        <div className="checks-empty">All 5 standard grounding checks passed.</div>
+                        <div className="checks-empty">
+                          No automated verification checks returned by API for this query.
+                        </div>
                       )}
                     </div>
                   </div>
@@ -639,7 +796,7 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
                 <Search size={32} className="empty-glyph" />
                 <div className="empty-title">Ready for Questions</div>
                 <p className="empty-subtitle">
-                  Ask a question above or choose a suggested inquiry to inspect verifiable evidence and citations.
+                  Ask a question above or choose a suggested inquiry to inspect evidence citations on this report.
                 </p>
 
                 {evidenceData && evidenceData.tables.length > 0 && (
@@ -660,4 +817,3 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
     </div>
   );
 };
-

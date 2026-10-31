@@ -35,7 +35,6 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
   const displayHeaders = useMemo(() => {
     if (!activeTable || !activeTable.headers || activeTable.headers.length === 0) return [];
     if (activeTable.headers.length === 1) return activeTable.headers[0];
-    // If multi-level, join non-empty segments
     const rowCount = activeTable.headers.length;
     const colCount = Math.max(...activeTable.headers.map((h) => h.length));
     const flat: string[] = [];
@@ -60,7 +59,6 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
       const valA = a[sortCol];
       const valB = b[sortCol];
 
-      // Clean numeric conversion
       const numA = typeof valA === "number" ? valA : parseFloat(String(valA).replace(/[^0-9.-]/g, ""));
       const numB = typeof valB === "number" ? valB : parseFloat(String(valB).replace(/[^0-9.-]/g, ""));
 
@@ -112,8 +110,8 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
 
     setSelectedValue(info);
 
-    // Call highlight callback using table's actual bounding box (honest bounding box provenance)
-    if (onHighlightTable) {
+    // Only trigger PDF highlight if table has an authentic bounding box from API
+    if (onHighlightTable && activeTable.bbox) {
       onHighlightTable(
         activeTable,
         `Table Provenance · Page ${activeTable.printed_page_number || activeTable.pdf_page_index + 1}`
@@ -136,7 +134,7 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
         <FileSpreadsheet size={32} className="state-icon" />
         <div className="state-title">No Structured Tables Detected</div>
         <div className="state-desc">
-          This document either contains only narrative text or table extraction did not detect formal grid boundaries.
+          No structured tables were extracted by the parser for this report.
         </div>
       </div>
     );
@@ -166,7 +164,7 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
           </select>
         </div>
 
-        {activeTable && onHighlightTable && (
+        {activeTable && onHighlightTable && activeTable.bbox && (
           <button
             type="button"
             className="btn-text-action"
@@ -246,18 +244,19 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
               <Info size={14} className="inspector-icon" />
               <span>SELECTED VALUE PROVENANCE</span>
             </div>
-            {onHighlightTable && (
+            {onHighlightTable && selectedValue.table.bbox && (
               <button
                 type="button"
                 className="btn-tiny-cobalt"
                 onClick={() =>
                   onHighlightTable(
                     selectedValue.table,
-                    `Table Row: ${selectedValue.rowLabel}`
+                    `Table: ${selectedValue.rowLabel}`
                   )
                 }
+                title="Highlight table on PDF page (table-level bounding box)"
               >
-                Highlight on PDF
+                Highlight Table on PDF
               </button>
             )}
           </div>
@@ -305,11 +304,16 @@ export const TableExplorer: React.FC<TableExplorerProps> = ({
           )}
 
           <div className="inspector-provenance-note">
-            Bounding Box provenance: <code>[x0: {selectedValue.table.bbox?.x0.toFixed(3) || "0"}, y0: {selectedValue.table.bbox?.y0.toFixed(3) || "0"}, x1: {selectedValue.table.bbox?.x1.toFixed(3) || "1"}, y1: {selectedValue.table.bbox?.y1.toFixed(3) || "1"}]</code>
+            {selectedValue.table.bbox ? (
+              <span>
+                Table Bounding Box: <code>[x0: {selectedValue.table.bbox.x0.toFixed(3)}, y0: {selectedValue.table.bbox.y0.toFixed(3)}, x1: {selectedValue.table.bbox.x1.toFixed(3)}, y1: {selectedValue.table.bbox.y1.toFixed(3)}]</code> (Table-level highlight; cell coordinates not provided by API)
+              </span>
+            ) : (
+              <span>No bounding box coordinates provided by table extraction for this table.</span>
+            )}
           </div>
         </div>
       )}
     </div>
   );
 };
-

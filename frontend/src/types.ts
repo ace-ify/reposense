@@ -145,29 +145,35 @@ export interface AnswerResponse {
   pipeline_trace: PipelineTraceStep[];
 }
 
+export interface EvaluationSummary {
+  total_cases: number;
+  passed_cases: number;
+  accuracy_percentage: number;
+  retrieval_mrr?: number;
+  arithmetic_accuracy?: number;
+  abstention_precision?: number;
+  avg_latency_ms?: number;
+  average_latency_ms?: number;
+}
+
+export interface EvaluationCase {
+  id: string;
+  family: string;
+  category: string;
+  question: string;
+  doc_id?: string;
+  status?: string;
+  passed: boolean;
+  latency_ms: number;
+  citations_count?: number;
+  notes?: string[];
+  calculation?: CalculationRecord;
+}
+
 export interface EvaluationData {
-  summary: {
-    total_cases: number;
-    passed_cases: number;
-    accuracy_percentage: number;
-    retrieval_mrr: number;
-    arithmetic_accuracy: number;
-    abstention_precision: number;
-    average_latency_ms: number;
-  };
-  test_results: Array<{
-    id: string;
-    family: string;
-    category: string;
-    question: string;
-    doc_id: string;
-    passed: boolean;
-    latency_ms: number;
-    status: string;
-    citations_count: number;
-    notes: string[];
-    calculation?: CalculationRecord;
-  }>;
+  summary: EvaluationSummary;
+  cases?: EvaluationCase[];
+  test_results?: EvaluationCase[];
 }
 
 export interface ActivityEntry {

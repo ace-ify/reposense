@@ -22,6 +22,8 @@ export const App: React.FC = () => {
   const [samples, setSamples] = useState<SampleReport[]>([]);
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
   const [evidenceData, setEvidenceData] = useState<DocumentEvidenceData | null>(null);
+  const [isLoadingEvidence, setIsLoadingEvidence] = useState<boolean>(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<Array<{ label: string; question: string; category?: string; intent?: string }>>([]);
 
   // QA & Evidence Highlighting State
@@ -32,6 +34,7 @@ export const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState<boolean>(false);
 
   // Benchmarks & Activity Feed
+  // NOTE: Initial state is null to show an honest empty state until a benchmark has been run!
   const [evalData, setEvalData] = useState<EvaluationData | null>(null);
   const [isEvalRunning, setIsEvalRunning] = useState<boolean>(false);
   const [activity, setActivity] = useState<ActivityEntry[]>([
@@ -39,7 +42,7 @@ export const App: React.FC = () => {
       id: "act_init",
       timestamp: "Today, Session start",
       title: "Report Navigator initialized",
-      details: "Evidence verification engine ready for government statistics reports.",
+      details: "Evidence verification engine ready.",
       type: "index",
     },
   ]);
@@ -59,25 +62,29 @@ export const App: React.FC = () => {
     ]);
   };
 
-  // 1. Initial Data Fetching (Documents, Samples, Evaluation Scorecard)
+  // 1. Initial Data Fetching & URL Param handling
   useEffect(() => {
-    // Load pre-seeded sample benchmarks
-    fetch("/api/v1/samples")
-      .then((res) => res.json())
-      .then((sampleData: SampleReport[]) => {
-        setSamples(sampleData);
-      })
-      .catch((err) => console.warn("Failed to fetch sample benchmarks:", err));
+    // Check URL query parameters for ?doc=<id>
+    const urlParams = new URLSearchParams(window.location.search);
+    const sharedDocId = urlParams.get("doc");
 
-    // Load registered documents
+    // Load registered documents from live API
     fetch("/api/v1/documents")
       .then((res) => res.json())
       .then((docs: DocumentItem[]) => {
         if (Array.isArray(docs) && docs.length > 0) {
           setDocuments(docs);
-          setSelectedDocId(docs[0].document_id);
+
+          // If a shared doc ID was passed in URL and exists in docs, select it!
+          if (sharedDocId && docs.some((d) => d.document_id === sharedDocId)) {
+            setSelectedDocId(sharedDocId);
+            setCurrentView("workspace");
+          } else if (!selectedDocId) {
+            setSelectedDocId(docs[0].document_id);
+          }
+
           addActivity(
-            `Loaded ${docs.length} indexed reports`,
+            `Loaded ${docs.length} indexed report${docs.length > 1 ? "s" : ""}`,
             `Active: ${docs[0].filename} (${docs[0].page_count} pages)`,
             "index"
           );
@@ -85,37 +92,74 @@ export const App: React.FC = () => {
       })
       .catch((err) => console.error("Error loading documents:", err));
 
-    // Load initial benchmark evaluation metrics
-    fetch("/api/v1/evaluation")
+    // Load sample report definitions
+    fetch("/api/v1/samples")
       .then((res) => res.json())
-      .then((data: EvaluationData) => setEvalData(data))
-      .catch((err) => console.warn("Error loading evaluation metrics:", err));
+      .then((sampleData: SampleReport[]) => {
+        setSamples(sampleData);
+      })
+      .catch((err) => console.warn("Failed to fetch sample benchmarks:", err));
   }, []);
 
-  // 2. Fetch Evidence and Suggestions when selected document changes
+  // 2. Fetch Evidence and Suggestions whenever selected document changes
+  // Immediately clears old evidence, answer, and highlight state so stale report data cannot display!
   useEffect(() => {
-    if (!selectedDocId) return;
+    if (!selectedDocId) {
+      setEvidenceData(null);
+      setAnswerData(null);
+      setActiveHighlight(null);
+      setTargetPageIndex(0);
+      setSuggestions([]);
+      setIsLoadingEvidence(false);
+      setEvidenceError(null);
+      return;
+    }
+
+    // Immediately reset state on document switch
+    setEvidenceData(null);
+    setAnswerData(null);
+    setActiveHighlight(null);
+    setTargetPageIndex(0);
+    setSuggestions([]);
+    setIsLoadingEvidence(true);
+    setEvidenceError(null);
+
+    let isCurrent = true;
 
     fetch(`/api/v1/documents/${selectedDocId}/evidence`)
       .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch evidence");
+        if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch evidence.`);
         return res.json();
       })
       .then((data: DocumentEvidenceData) => {
+        if (!isCurrent) return;
         setEvidenceData(data);
+        setIsLoadingEvidence(false);
       })
-      .catch((err) => console.warn("Error fetching evidence:", err));
+      .catch((err) => {
+        if (!isCurrent) return;
+        console.warn("Error fetching evidence:", err);
+        setEvidenceError(err.message || "Failed to load document evidence.");
+        setIsLoadingEvidence(false);
+      });
 
     fetch(`/api/v1/documents/${selectedDocId}/suggestions`)
       .then((res) => res.json())
       .then((suggs) => {
+        if (!isCurrent) return;
         if (Array.isArray(suggs) && suggs.length > 0) {
           setSuggestions(suggs);
         } else {
           setSuggestions([]);
         }
       })
-      .catch(() => setSuggestions([]));
+      .catch(() => {
+        if (isCurrent) setSuggestions([]);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
   }, [selectedDocId]);
 
   // Handle PDF file upload
@@ -136,8 +180,7 @@ export const App: React.FC = () => {
       const newDoc: DocumentItem = await res.json();
       setDocuments((prev) => [newDoc, ...prev]);
       setSelectedDocId(newDoc.document_id);
-      addActivity(`Indexed ${newDoc.filename}`, `${newDoc.page_count} pages processed with table boundaries`, "upload");
-      // Seamlessly navigate into workspace for the newly uploaded document
+      addActivity(`Indexed ${newDoc.filename}`, `${newDoc.page_count} pages processed`, "upload");
       setCurrentView("workspace");
     } catch (err) {
       alert("Failed to upload and parse PDF document.");
@@ -146,7 +189,7 @@ export const App: React.FC = () => {
     }
   };
 
-  // Handle Asking a Question (from either Dashboard or Workspace)
+  // Handle Asking a Question
   const handleAskQuestion = async (queryText: string, docIdToUse?: string) => {
     const docId = docIdToUse || selectedDocId;
     if (!queryText.trim() || !docId) return;
@@ -171,11 +214,11 @@ export const App: React.FC = () => {
 
       addActivity(
         `Answered: "${queryText.slice(0, 45)}..."`,
-        `Outcome: ${data.status.toUpperCase()} · ${data.citations.length} citations`,
+        `Status: ${data.status.toUpperCase()} · ${data.citations.length} citation${data.citations.length === 1 ? "" : "s"}`,
         "query"
       );
 
-      // Auto-navigate to top cited evidence
+      // Auto-navigate to top cited evidence if bbox present
       if (data.citations && data.citations.length > 0) {
         const topCitation = data.citations[0];
         if (topCitation.bbox) {
@@ -198,7 +241,16 @@ export const App: React.FC = () => {
 
   // User selects a document from the Research Dashboard
   const handleSelectDocument = (docId: string, initialQuestion?: string) => {
-    setSelectedDocId(docId);
+    if (docId !== selectedDocId) {
+      setSelectedDocId(docId);
+      setEvidenceData(null);
+      setAnswerData(null);
+      setActiveHighlight(null);
+      setTargetPageIndex(0);
+      setSuggestions([]);
+      setIsLoadingEvidence(true);
+      setEvidenceError(null);
+    }
     setCurrentView("workspace");
 
     if (initialQuestion) {
@@ -210,8 +262,9 @@ export const App: React.FC = () => {
   const handleSelectCitation = (citation: CitationItem) => {
     setTargetPageIndex(citation.pdf_page_index);
     if (citation.bbox) {
+      const bbox = citation.bbox;
       setActiveHighlight({
-        bbox: citation.bbox,
+        bbox: bbox,
         id: citation.evidence_id,
         label: `Cited Evidence · Page ${citation.printed_page_number || citation.pdf_page_index + 1}`,
         pageIndex: citation.pdf_page_index,
@@ -223,8 +276,9 @@ export const App: React.FC = () => {
   const handleHighlightTable = (table: TableItem, label?: string) => {
     setTargetPageIndex(table.pdf_page_index);
     if (table.bbox) {
+      const bbox = table.bbox;
       setActiveHighlight({
-        bbox: table.bbox,
+        bbox: bbox,
         id: table.table_id,
         label: label || `Table on Page ${table.printed_page_number || table.pdf_page_index + 1}`,
         pageIndex: table.pdf_page_index,
@@ -271,6 +325,8 @@ export const App: React.FC = () => {
         <ReportWorkspace
           document={selectedDocument}
           evidenceData={evidenceData}
+          isLoadingEvidence={isLoadingEvidence}
+          evidenceError={evidenceError}
           suggestions={suggestions}
           answerData={answerData}
           targetPageIndex={targetPageIndex}

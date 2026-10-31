@@ -2336,3 +2336,145 @@ input, select {
   color: var(--text-muted);
   max-width: 440px;
 }
+
+/* Grounding Match Badges */
+.match-pill.flagged {
+  background-color: var(--color-amber-subtle);
+  color: #92400e;
+}
+
+.match-pill.neutral {
+  background-color: var(--cobalt-light);
+  color: var(--cobalt-primary);
+}
+
+.match-pill.unreferenced {
+  background-color: var(--bg-subtle);
+  color: var(--text-muted);
+}
+
+.dot-blue {
+  background-color: var(--cobalt-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.dot-rose {
+  background-color: var(--color-rose);
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
+}
+
+/* Settings View */
+.settings-view-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Note Modal */
+.note-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(17, 24, 39, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  backdrop-filter: blur(2px);
+  animation: modalFadeIn 0.15s ease;
+}
+
+@keyframes modalFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.note-modal-card {
+  background-color: #ffffff;
+  border: 1px solid var(--border-main);
+  border-radius: 8px;
+  width: 90%;
+  max-width: 520px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.note-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  background-color: var(--bg-sidebar);
+}
+
+.note-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.note-modal-body {
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.note-textarea {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border-main);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+}
+
+.note-textarea:focus {
+  border-color: var(--cobalt-primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+}
+
+.note-storage-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.note-storage-hint code {
+  font-family: monospace;
+  background-color: var(--bg-subtle);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.note-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border-subtle);
+  background-color: var(--bg-sidebar);
+}
+
+.btn-note-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--color-rose);
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background-color 0.12s ease;
+}
+
+.btn-note-delete:hover {
+  background-color: var(--color-rose-subtle);
+}
