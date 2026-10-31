@@ -19,6 +19,7 @@ interface HighlightBox {
   bbox: BoundingBox;
   id: string;
   label?: string;
+  pageIndex: number;
 }
 
 interface PdfViewerProps {
@@ -36,6 +37,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const highlightRef = useRef<HTMLDivElement | null>(null);
   const [pdfDoc, setPdfDoc] = useState<any>(null);
   const [currentPage, setCurrentPage] = useState<number>(targetPageIndex + 1);
   const [numPages, setNumPages] = useState<number>(1);
@@ -45,10 +47,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   // Sync when targetPageIndex changes from citation clicks
   useEffect(() => {
-    if (targetPageIndex >= 0 && targetPageIndex < numPages) {
+    if (pdfDoc && targetPageIndex >= 0 && targetPageIndex < pdfDoc.numPages) {
       setCurrentPage(targetPageIndex + 1);
     }
-  }, [targetPageIndex, numPages]);
+  }, [targetPageIndex, pdfDoc]);
+
+  // Auto-scroll highlight into view when page renders
+  useEffect(() => {
+    if (activeHighlight && activeHighlight.pageIndex === currentPage - 1 && highlightRef.current && containerRef.current) {
+      setTimeout(() => {
+        highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    }
+  }, [currentPage, activeHighlight]);
 
   // Load PDF document
   useEffect(() => {
@@ -137,8 +148,8 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
   };
 
-  // Check if highlight applies to current page
-  const showHighlight = activeHighlight && targetPageIndex === currentPage - 1;
+  // Check if highlight applies strictly to current page
+  const showHighlight = activeHighlight && activeHighlight.pageIndex === currentPage - 1;
 
   return (
     <div className="pdf-viewer-container" ref={containerRef}>
@@ -198,6 +209,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           {/* Interactive Bounding Box Highlight Overlay */}
           {showHighlight && activeHighlight && (
             <div
+              ref={highlightRef}
               className="bounding-box-highlight"
               style={{
                 position: "absolute",

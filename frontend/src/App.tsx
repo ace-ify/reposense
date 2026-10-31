@@ -114,7 +114,8 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [answerData, setAnswerData] = useState<AnswerResponse | null>(null);
-  const [activeHighlight, setActiveHighlight] = useState<{ bbox: any; id: string; label?: string } | null>(null);
+  const [activeHighlight, setActiveHighlight] = useState<{ bbox: any; id: string; label?: string; pageIndex: number } | null>(null);
+  const [suggestions, setSuggestions] = useState<Array<{ category: string; label: string; question: string; intent?: string }>>([]);
   const [targetPageIndex, setTargetPageIndex] = useState<number>(0);
   const [apiConnected, setApiConnected] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<"answer" | "trace" | "evidence">("answer");
@@ -137,15 +138,17 @@ export default function App() {
       .then((res) => res.json())
       .then((data: SampleReport[]) => {
         setSamples(data);
-        if (data.length > 0 && !selectedDocId) {
-          setSelectedDocId(data[0].document_id);
-        }
       })
       .catch((err) => console.error("Error loading samples:", err));
 
     fetch("/api/v1/documents")
       .then((res) => res.json())
-      .then((docs: DocumentItem[]) => setDocuments(docs))
+      .then((docs: DocumentItem[]) => {
+        setDocuments(docs);
+        if (docs.length > 0 && !selectedDocId) {
+          setSelectedDocId(docs[0].document_id);
+        }
+      })
       .catch((err) => console.error("Error loading documents:", err));
 
     fetch("/api/v1/evaluation")
@@ -160,6 +163,17 @@ export default function App() {
       .then((res) => res.json())
       .then((data) => setEvidenceData(data))
       .catch((err) => console.error("Error fetching evidence:", err));
+
+    fetch(`/api/v1/documents/${selectedDocId}/suggestions`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setSuggestions(data);
+        } else {
+          setSuggestions([]);
+        }
+      })
+      .catch(() => setSuggestions([]));
   }, [selectedDocId]);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -215,6 +229,7 @@ export default function App() {
           bbox: topCitation.bbox,
           id: topCitation.evidence_id,
           label: `${topCitation.kind?.toUpperCase() || "EVIDENCE"} (p. ${topCitation.printed_page_number || topCitation.pdf_page_index + 1})`,
+          pageIndex: topCitation.pdf_page_index,
         });
       }
     } catch (err) {
@@ -244,6 +259,7 @@ export default function App() {
         bbox: citation.bbox,
         id: citation.evidence_id,
         label: `${citation.kind?.toUpperCase() || "EVIDENCE"} (Page ${citation.printed_page_number || citation.pdf_page_index + 1})`,
+        pageIndex: citation.pdf_page_index,
       });
     }
   };
@@ -304,28 +320,30 @@ export default function App() {
                 </h3>
               </div>
 
-              {samples.length > 0 && (
-                <div className="benchmark-picker">
-                  <span className="picker-label">PRE-LOADED BENCHMARK REPORTS</span>
-                  {samples.map((s) => (
+              <div className="benchmark-picker">
+                <span className="picker-label">ACTIVE & LOADED REPORTS</span>
+                {documents.map((d) => {
+                  const sampleMatch = samples.find((s) => s.document_id === d.document_id);
+                  const title = sampleMatch?.title || d.filename;
+                  return (
                     <button
-                      key={s.document_id}
+                      key={d.document_id}
                       type="button"
-                      className={`benchmark-btn ${selectedDocId === s.document_id ? "active" : ""}`}
+                      className={`benchmark-btn ${selectedDocId === d.document_id ? "active" : ""}`}
                       onClick={() => {
-                        setSelectedDocId(s.document_id);
+                        setSelectedDocId(d.document_id);
                         setAnswerData(null);
                         setActiveHighlight(null);
                       }}
                     >
-                      <div className="benchmark-btn-title">{s.title}</div>
+                      <div className="benchmark-btn-title">{title}</div>
                       <div className="benchmark-btn-meta">
-                        {s.pages} Pages • Multi-level Tables • Footnotes
+                        {d.page_count} Pages • {(d.processing_status || "READY").toUpperCase()}
                       </div>
                     </button>
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
 
               <div className="upload-container">
                 <label className="upload-dropzone">
@@ -366,13 +384,13 @@ export default function App() {
 
           {/* CENTER COLUMN: Intelligence Hub & Answers */}
           <section className="panel-col center-column">
-            {currentSample?.sample_questions && (
+            {((suggestions && suggestions.length > 0) || currentSample?.sample_questions) && (
               <div className="quick-questions-strip">
                 <div className="strip-title">
-                  <Sparkles size={14} /> 1-CLICK BENCHMARK EVALUATION QUERIES
+                  <Sparkles size={14} /> 1-CLICK DYNAMIC BENCHMARK EVALUATION QUERIES
                 </div>
                 <div className="pills-grid">
-                  {currentSample.sample_questions.map((sq, i) => (
+                  {(suggestions.length > 0 ? suggestions : (currentSample?.sample_questions || [])).map((sq, i) => (
                     <button
                       key={i}
                       type="button"

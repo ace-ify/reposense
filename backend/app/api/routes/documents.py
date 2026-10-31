@@ -73,3 +73,96 @@ def get_document_evidence(document_id: str) -> dict[str, Any]:
         "evidence": [e.model_dump() for e in evidence],
         "tables": [t.model_dump() for t in tables],
     }
+
+@router.get("/{document_id}/suggestions", response_model=list[dict[str, Any]])
+def get_document_suggestions(document_id: str) -> list[dict[str, Any]]:
+    registry = get_registry()
+    doc = registry.get_document(document_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail=f"Document '{document_id}' not found.")
+
+    tables = registry.get_tables(document_id)
+    evidence = registry.get_evidence(document_id)
+    suggestions: list[dict[str, Any]] = []
+
+    # If we have structured tables, generate domain-agnostic questions from the table
+    if tables:
+        # Pick the most populated table
+        best_table = max(tables, key=lambda t: len(t.rows) * len(t.headers))
+        t_title = best_table.title or f"Table on Page {best_table.printed_page_number}"
+        t_clean_title = t_title.replace("Title:", "").strip()
+
+        # Find year columns if any
+        year_headers = [h for h in best_table.headers if re.search(r"\b(20\d\d|19\d\d)\b", h)]
+        
+        # 1. Row lookup
+        first_row_label = ""
+        for r in best_table.rows:
+            label = r[1] if len(r) > 1 and r[1] and not r[1].isdigit() else r[0]
+            if label and not label.isdigit() and label.lower() not in ("total", "s.no.", "s. no.", "sl"):
+                first_row_label = label
+                break
+
+        if first_row_label:
+            if year_headers:
+                latest_year = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1]).group(1)
+                suggestions.append({
+                    "category": "Table Lookup",
+                    "label": f"🎯 Table Lookup: {first_row_label} ({latest_year})",
+                    "question": f"What was the value for {first_row_label} in {latest_year}?",
+                    "intent": "lookup",
+                })
+            else:
+                suggestions.append({
+                    "category": "Table Lookup",
+                    "label": f"🎯 Table Lookup: {first_row_label}",
+                    "question": f"What were the recorded figures for {first_row_label} in {t_clean_title}?",
+                    "intent": "lookup",
+                })
+
+        # 2. Deterministic Arithmetic (Percentage Change across periods)
+        if len(year_headers) >= 2 and first_row_label:
+            y1 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-2]).group(1)
+            y2 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1]).group(1)
+            suggestions.append({
+                "category": "Deterministic Arithmetic",
+                "label": f"🔢 Deterministic Math: {first_row_label} ({y1}-{y2})",
+                "question": f"What was the percentage change in {first_row_label} between {y1} and {y2}?",
+                "intent": "comparison",
+            })
+
+        # 3. Cross-Entity Difference
+        valid_row_labels = []
+        for r in best_table.rows:
+            lbl = r[1] if len(r) > 1 and r[1] and not r[1].isdigit() else r[0]
+            if lbl and not lbl.isdigit() and lbl.lower() not in ("total", "s.no.", "s. no.", "sl"):
+                valid_row_labels.append(lbl)
+                if len(valid_row_labels) >= 2:
+                    break
+
+        if len(valid_row_labels) >= 2:
+            period_suffix = f" in {re.search(r'\b(20\d\d|19\d\d)\b', year_headers[-1]).group(1)}" if year_headers else ""
+            suggestions.append({
+                "category": "Multi-Entity Difference",
+                "label": f"⚖️ Comparison: {valid_row_labels[0]} vs {valid_row_labels[1]}",
+                "question": f"What was the difference between {valid_row_labels[0]} and {valid_row_labels[1]}{period_suffix}?",
+                "intent": "comparison",
+            })
+
+        # 4. Total/Overall Query
+        suggestions.append({
+            "category": "Total / Category Breakdown",
+            "label": f"📊 Total Breakdown: {t_clean_title[:35]}",
+            "question": f"What was the total and overall breakdown in {t_clean_title}?",
+            "intent": "lookup",
+        })
+
+    # 5. Domain-Agnostic Abstention Query
+    suggestions.append({
+        "category": "Honest Abstention",
+        "label": "🛡️ Abstention Check: Unreported Future Metric",
+        "question": "What is the projected outcome for fiscal year 2049?",
+        "intent": "unanswerable",
+    })
+
+    return suggestions
