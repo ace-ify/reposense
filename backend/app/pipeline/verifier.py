@@ -76,9 +76,20 @@ class EvidenceVerifier:
         if classification.target_entities:
             missing_entities = []
             for ent in classification.target_entities:
-                # Check if words in entity appear in evidence
+                # Every word in the target entity must be present in retrieved evidence (supporting plural/singular forms)
                 words = [w.lower() for w in ent.split() if len(w) > 2]
-                if words and not any(w in all_evidence_text for w in words):
+                unmatched_words = []
+                for w in words:
+                    matched = (
+                        w in all_evidence_text
+                        or (w.endswith("s") and w[:-1] in all_evidence_text)
+                        or (w.endswith("es") and w[:-2] in all_evidence_text)
+                        or (w.endswith("ies") and (w[:-3] + "y") in all_evidence_text)
+                    )
+                    if not matched:
+                        unmatched_words.append(w)
+
+                if unmatched_words:
                     missing_entities.append(ent)
 
             if missing_entities:

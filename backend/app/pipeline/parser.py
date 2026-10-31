@@ -262,11 +262,13 @@ class PyMuPDFDocumentParser(DocumentParser):
                     )
 
             # 2. Extract narrative text blocks (paragraphs, headings, footnotes)
-            text_blocks = page.get_text("blocks")
+            raw_blocks = page.get_text("blocks")
             narrative_count = 0
             has_text = False
 
-            for b in text_blocks:
+            # Merge vertically adjacent line fragments into full paragraphs
+            merged_blocks: list[list[Any]] = []
+            for b in raw_blocks:
                 b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
                 raw_b_text = str(b[4]).strip()
                 if not raw_b_text:
@@ -283,6 +285,31 @@ class PyMuPDFDocumentParser(DocumentParser):
                         break
                 if overlaps_table:
                     continue
+
+                # Try merging with previous block if vertically adjacent (< 12pt gap) and similar left margin
+                if merged_blocks:
+                    prev = merged_blocks[-1]
+                    prev_rect = pymupdf.Rect(prev[0], prev[1], prev[2], prev[3])
+                    v_gap = b_rect.y0 - prev_rect.y1
+                    h_diff = abs(b_rect.x0 - prev_rect.x0)
+
+                    # Only merge if gap is small and not starting a new section/heading
+                    if 0 <= v_gap < 12 and h_diff < 20 and not b_rect.y0 > 0.85:
+                        merged_blocks[-1] = [
+                            min(prev[0], b[0]),
+                            min(prev[1], b[1]),
+                            max(prev[2], b[2]),
+                            max(prev[3], b[3]),
+                            prev[4].rstrip() + " " + raw_b_text,
+                            prev[5],
+                        ]
+                        continue
+
+                merged_blocks.append(list(b))
+
+            for b in merged_blocks:
+                b_rect = pymupdf.Rect(b[0], b[1], b[2], b[3])
+                raw_b_text = str(b[4]).strip()
 
                 narrative_count += 1
                 ev_id = f"ev_narr_{document_id}_p{p_idx}_{narrative_count}"

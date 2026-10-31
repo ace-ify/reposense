@@ -74,7 +74,7 @@ class QuestionClassifier:
             intent = "ambiguous"
             rationale = "Question is too brief or ambiguous."
 
-        # Extract candidate target metrics and entities
+        # Extract candidate target metrics and entities dynamically
         target_entities: list[str] = []
         target_metrics: list[str] = []
 
@@ -83,28 +83,43 @@ class QuestionClassifier:
         if between_match:
             ent1 = between_match.group(1).strip()
             ent2 = between_match.group(2).strip()
-            # Clean trailing words like 'investment', 'capacity'
-            clean1 = re.sub(r"\b(investment|capacity|expenditure|revenue|subsidies|subsidy)\b", "", ent1, flags=re.IGNORECASE).strip()
-            clean2 = re.sub(r"\b(investment|capacity|expenditure|revenue|subsidies|subsidy)\b", "", ent2, flags=re.IGNORECASE).strip()
+            # Clean common trailing query words
+            clean1 = re.sub(r"\b(investment|capacity|expenditure|revenue|subsidies|subsidy|taxes|tax|sales|profit|margin|rate)\b", "", ent1, flags=re.IGNORECASE).strip()
+            clean2 = re.sub(r"\b(investment|capacity|expenditure|revenue|subsidies|subsidy|taxes|tax|sales|profit|margin|rate)\b", "", ent2, flags=re.IGNORECASE).strip()
             if clean1:
                 target_entities.append(clean1.title())
             if clean2:
                 target_entities.append(clean2.title())
 
-        # Extract subject phrases by filtering out stop words, question words, and periods
+        # Metric-indicator words to filter out from entity names
+        metric_words = {
+            "investment", "investments", "revenue", "revenues", "spending", "receipts", "receipt",
+            "expenditure", "expenditures", "capacity", "sales", "income", "profit", "profits",
+            "margin", "margins", "tax", "taxes", "rate", "rates", "cost", "costs", "price",
+            "prices", "volume", "deficit", "surplus", "outlay", "outlays", "subsidy", "subsidies"
+        }
+
+        # Extract subject phrases dynamically by filtering out common grammar, query operators, and metric words
         ignored_tokens = {
             "what", "were", "was", "is", "are", "how", "why", "when", "which",
             "the", "a", "an", "in", "of", "for", "between", "and", "or", "to", "from",
             "total", "combined", "overall", "difference", "change", "percentage",
-            "percent", "growth", "rate", "projected", "projection"
-        }
-        tokens = [t for t in re.findall(r"\b[a-zA-Z]{3,}\b", q_lower) if t not in ignored_tokens]
+            "percent", "growth", "rate", "projected", "projection", "did", "does",
+            "do", "much", "many", "report", "reported", "document", "table"
+        }.union(metric_words)
+
+        # Allow 2-letter words like 'pv', 'ev', 'us', 'uk', 'ai'
+        tokens = [t for t in re.findall(r"\b[a-zA-Z]{2,}\b", q_lower) if t not in ignored_tokens]
         if not target_entities and tokens:
             target_entities.append(" ".join(tokens).title())
 
-        for met in ["revenue", "receipts", "expenditure", "capacity", "investment", "growth", "gdp", "emissions", "subsidy", "subsidies"]:
-            if met in q_lower:
-                target_metrics.append(met.title())
+        # Extract candidate metric phrases dynamically
+        metric_match = re.search(r"(?:total|net|gross|average|annual|compound)?\s*([a-zA-Z\s]{3,25})\s*(?:in|for|between|during|\?|$)", q_lower)
+        if metric_match:
+            candidate_metric = metric_match.group(1).strip()
+            clean_metric_words = [w for w in candidate_metric.split() if w not in ignored_tokens]
+            if clean_metric_words:
+                target_metrics.append(" ".join(clean_metric_words).title())
 
         return QuestionClassification(
             intent=intent,

@@ -50,17 +50,31 @@ class ReportIntelligenceEngine:
             },
         )
 
+        # Determine target document IDs (default to all active documents if omitted)
+        target_doc_ids = request.document_ids
+        if not target_doc_ids:
+            target_doc_ids = list(self.registry.documents.keys())
+
+        if not target_doc_ids:
+            return AnswerResponse(
+                status="not_found",
+                answer="UNANSWERED (No Documents Registered): Please upload a PDF report first before asking questions.",
+                warnings=["No documents have been uploaded or registered in the system."],
+                classification=classification,
+                pipeline_trace=trace,
+            )
+
         # Step 2: Hybrid Retrieval (BM25 + Semantic + Table Expansion)
         retrieved_evidence = list(
             self.registry.retriever.retrieve(
                 question=request.question,
-                document_ids=request.document_ids,
+                document_ids=target_doc_ids,
                 top_k=8,
             )
         )
         record_step(
             stage="retrieval",
-            desc=f"Retrieved {len(retrieved_evidence)} candidate evidence items across {len(request.document_ids)} document(s)",
+            desc=f"Retrieved {len(retrieved_evidence)} candidate evidence items across {len(target_doc_ids)} document(s)",
             data={
                 "candidate_count": len(retrieved_evidence),
                 "evidence_ids": [e.evidence_id for e in retrieved_evidence],

@@ -15,8 +15,25 @@ QuestionIntent = Literal[
 ]
 
 class QuestionRequest(BaseModel):
-    question: str = Field(min_length=1, max_length=4000)
-    document_ids: list[str] = Field(min_length=1)
+    question: str = Field(
+        ...,
+        min_length=1,
+        max_length=4000,
+        description="Natural language question to ask against the uploaded report(s).",
+    )
+    document_ids: list[str] = Field(
+        default_factory=list,
+        description="List of document IDs to query. If omitted or empty, searches active registered documents.",
+    )
+
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "question": "What were total Solar PV investments in 2023?",
+                "document_ids": ["doc_sample_energy_2024"],
+            }
+        }
+    }
 
 class CalculationRecord(BaseModel):
     operation: str

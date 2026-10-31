@@ -158,20 +158,33 @@ class AnswerReasoner:
             if len(classification.target_entities) >= 2 and classification.target_periods:
                 target_period = classification.target_periods[0]
                 matched_by_entity: dict[str, tuple[float, EvidenceItem]] = {}
-                generic_words = {"power", "energy", "clean", "total", "sector", "technology", "the", "and", "investment"}
+                # Universal domain-agnostic table stopwords
+                domain_agnostic_stopwords = {
+                    "the", "a", "an", "and", "or", "in", "of", "for", "to", "total",
+                    "subtotal", "average", "rate", "category", "source", "item",
+                    "indicator", "value", "amount", "change", "growth", "difference",
+                    "sector", "technology", "department", "company", "group", "division"
+                }
 
                 for ent in classification.target_entities:
                     ent_clean = ent.lower()
-                    distinguishing = [w for w in ent_clean.split() if w not in generic_words and len(w) > 2]
+                    distinguishing = [w for w in ent_clean.split() if w not in domain_agnostic_stopwords and len(w) > 2]
                     if not distinguishing:
                         distinguishing = [w for w in ent_clean.split() if len(w) > 2]
 
+                    # Find best matching row by token overlap
+                    best_match: tuple[float, float, EvidenceItem] | None = None
                     for label, val, _, ev in extracted_nums:
                         if target_period in label:
                             ev_lower = ev.text.lower()
-                            if all(w in ev_lower for w in distinguishing):
-                                matched_by_entity[ent] = (val, ev)
-                                break
+                            matched_tokens = sum(1 for w in distinguishing if w in ev_lower)
+                            if matched_tokens > 0:
+                                score = matched_tokens / len(distinguishing)
+                                if best_match is None or score > best_match[0]:
+                                    best_match = (score, val, ev)
+
+                    if best_match and best_match[0] >= 0.5:
+                        matched_by_entity[ent] = (best_match[1], best_match[2])
 
                 if len(matched_by_entity) >= 2:
                     ent_keys = list(matched_by_entity.keys())

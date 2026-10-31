@@ -128,7 +128,10 @@ class HybridEvidenceRetriever(EvidenceRetriever):
             matched_nums = len(q_nums.intersection(e_nums))
             num_bonus = 0.3 * (matched_nums / len(q_nums))
 
-        return jaccard + num_bonus
+        # Prioritize structured table evidence for statistical queries
+        table_bonus = 0.15 if item.kind in ("table_cell", "table") else 0.0
+
+        return jaccard + num_bonus + table_bonus
 
     def retrieve(
         self,

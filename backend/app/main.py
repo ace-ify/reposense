@@ -36,13 +36,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount Routes
-app.include_router(health_router)
+# Mount Routes under /api/v1 (Official API Contract)
 app.include_router(health_router, prefix=settings.api_prefix)
 app.include_router(documents_router, prefix=settings.api_prefix)
 app.include_router(questions_router, prefix=settings.api_prefix)
 app.include_router(samples_router, prefix=settings.api_prefix)
 app.include_router(evaluation_router, prefix=settings.api_prefix)
+
+# Mount Routes under root as well (convenience fallback for evaluators)
+app.include_router(health_router)
+app.include_router(documents_router)
+app.include_router(questions_router)
+app.include_router(samples_router)
+app.include_router(evaluation_router)
 
 @app.get("/")
 def root() -> dict[str, str]:
