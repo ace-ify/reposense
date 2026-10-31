@@ -1,4 +1,4 @@
-# Report Navigator
+# RepoSense
 
 **Ask questions about a long statistics report and trace each answer back to its source page.**
 
@@ -38,7 +38,7 @@ Treat these as configured deployment targets until the services have been deploy
 
 The implemented retriever is an in-process hybrid of BM25 and lexical/token-overlap similarity. Although `.env.example` includes embedding and reranker model settings for future work, the current retrieval code does not call a dense embedding model or a cross-encoder reranker. The document registry, parsed evidence, and indexes are held in process memory; PDFs and parse-cache files are written under the configured upload directory. PostgreSQL and Qdrant are present in the local Docker Compose file but are not currently wired into the runtime registry or retrieval path.
 
-PDF parsing is implemented with PyMuPDF. The deployment Docker image installs Tesseract, but the current parser behavior should be checked against the report being used; this README does not claim universal OCR or PDF-layout support. Table extraction and citation precision depend on the PDF layout and the quality of the parser output.
+PDF parsing is implemented with PyMuPDF, including its OCR text-page fallback for pages with little or no native text. The deployment Docker image installs Tesseract for that path. OCR and table extraction still depend on report quality and layout; validate results against the report being used.
 
 ## Architecture
 
@@ -71,7 +71,7 @@ React UI + PDF.js viewer + evidence/table navigation and highlights
 | Area | Implementation |
 | --- | --- |
 | API | Python 3.11+, FastAPI, Pydantic, Uvicorn |
-| PDF extraction | PyMuPDF; Tesseract is installed in the API container |
+| PDF extraction | PyMuPDF text and table extraction, with OCR fallback via PyMuPDF/Tesseract |
 | Retrieval | In-process BM25, token-overlap similarity, RRF fusion, table-parent context expansion |
 | Question processing | Intent classifier, evidence-driven answer service, verifier, deterministic calculator |
 | Optional generation | Groq (`llama-3.3-70b-versatile`) or OpenAI (`gpt-4o-mini`) via chat completions |
@@ -144,7 +144,7 @@ Copy `.env.example` to `.env`. Settings are read by the backend from the environ
 | --- | --- | --- |
 | `ENVIRONMENT` | Runtime environment label | `development` |
 | `UPLOAD_DIR` | Uploaded PDFs and parse cache location | `data/uploads` |
-| `MAX_UPLOAD_MB` | Configured maximum upload size | `100` |
+| `MAX_UPLOAD_MB` | Upload-size setting; enforcement should be confirmed before public use | `100` |
 | `GROQ_API_KEY` | Enables Groq chat-completion synthesis when set | Empty |
 | `OPENAI_API_KEY` | Enables OpenAI chat-completion synthesis when set and Groq is not set | Empty |
 | `SEED_SAMPLE_DOCUMENTS` | Seeds sample PDFs during application startup when true | `false` |
@@ -172,6 +172,7 @@ Base path: `/api/v1`. Interactive schema: `/docs`.
 | `POST` | `/questions` | Ask a question about one or more document IDs |
 | `GET` | `/samples` | Seed and list built-in sample report definitions/questions |
 | `GET` | `/evaluation` | Run and return the built-in benchmark scorecard |
+| `POST` | `/evaluation/run` | Run the built-in benchmark scorecard |
 
 Example upload:
 
