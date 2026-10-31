@@ -6,8 +6,10 @@ from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.pipeline.registry import get_registry
+from backend.app.core.upload_observability import emit
 from backend.app.schemas.evidence import DocumentItem, EvidenceItem, TableItem
 
 logger = logging.getLogger(__name__)
@@ -19,7 +21,7 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentItem:
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
 
-    logger.info(f"[UPLOAD] Request entered: filename={file.filename}")
+    emit("[UPLOAD] Multipart parsed")
 
     registry = get_registry()
     suffix = Path(file.filename).suffix
@@ -30,7 +32,7 @@ async def upload_document(file: UploadFile = File(...)) -> DocumentItem:
     logger.info(f"[UPLOAD] File saved to temp: path={tmp_path.name}")
 
     try:
-        doc_item = registry.register_file(tmp_path, file.filename)
+        doc_item = await run_in_threadpool(registry.register_file, tmp_path, file.filename)
         logger.info(f"[UPLOAD] Document registered successfully: doc_id={doc_item.document_id}")
         return doc_item
     except Exception as exc:

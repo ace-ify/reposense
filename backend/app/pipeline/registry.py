@@ -4,6 +4,8 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from threading import Lock
+from backend.app.core.upload_observability import phase
 from backend.app.core.config import get_settings
 from backend.app.pipeline.parser import PyMuPDFDocumentParser
 from backend.app.pipeline.retriever import HybridEvidenceRetriever
@@ -23,6 +25,7 @@ class DocumentRegistry:
     """
 
     def __init__(self, upload_dir: str | Path | None = None):
+        self._registration_lock = Lock()
         settings = get_settings()
         self.upload_dir = Path(upload_dir or settings.upload_dir)
         self.upload_dir.mkdir(parents=True, exist_ok=True)
@@ -37,6 +40,12 @@ class DocumentRegistry:
         self.retriever = HybridEvidenceRetriever()
 
     def register_file(self, file_path: Path, filename: str, doc_id: str | None = None) -> DocumentItem:
+        # Hold through indexing: IDs, parser, cache, and retriever are shared.
+        # Upload callers acquire this lock in a worker, never on the event loop.
+        with self._registration_lock:
+            return self._register_file(file_path, filename, doc_id)
+
+    def _register_file(self, file_path: Path, filename: str, doc_id: str | None = None) -> DocumentItem:
         if not file_path.is_file():
             raise FileNotFoundError(f"File not found: {file_path}")
 
@@ -53,7 +62,7 @@ class DocumentRegistry:
 
         if cache_file.exists():
             try:
-                with gzip.open(cache_file, "rt", encoding="utf-8") as f:
+                with phase("Cache load"), gzip.open(cache_file, "rt", encoding="utf-8") as f:
                     cache_data = json.load(f)
                 doc_item = DocumentItem(**cache_data["doc_item"])
                 cached_document_id = doc_item.document_id
@@ -89,10 +98,11 @@ class DocumentRegistry:
                     for t in cache_data["table_items"]
                 ]
             except Exception:
-                doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
-                    destination, document_id
-                )
-                with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+                with phase("Parsing"):
+                    doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
+                        destination, document_id
+                    )
+                with phase("Cache serialization"), gzip.open(cache_file, "wt", encoding="utf-8") as f:
                     json.dump(
                         {
                             "doc_item": doc_item.model_dump(),
@@ -106,9 +116,10 @@ class DocumentRegistry:
             # Parse document
             logger.info(f"[PIPELINE] Parsing started: doc_id={document_id}, filename={filename}")
             try:
-                doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
-                    destination, document_id
-                )
+                with phase("Parsing"):
+                    doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
+                        destination, document_id
+                    )
             except Exception as e:
                 logger.exception(f"[PIPELINE] Parsing failed: doc_id={document_id}")
                 raise
@@ -116,7 +127,7 @@ class DocumentRegistry:
                 f"[PIPELINE] Parsing completed: doc_id={document_id}, page_count={doc_item.page_count}"
             )
             try:
-                with gzip.open(cache_file, "wt", encoding="utf-8") as f:
+                with phase("Cache serialization"), gzip.open(cache_file, "wt", encoding="utf-8") as f:
                     json.dump(
                         {
                             "doc_item": doc_item.model_dump(),
@@ -137,7 +148,8 @@ class DocumentRegistry:
 
         # Index in hybrid retriever
         try:
-            self.retriever.index_document(document_id, evidence_items, table_items)
+            with phase("Indexing"):
+                self.retriever.index_document(document_id, evidence_items, table_items)
             logger.info(f"[PIPELINE] Indexing completed: doc_id={document_id}")
         except Exception as e:
             logger.exception(f"[PIPELINE] Indexing failed: doc_id={document_id}")

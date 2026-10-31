@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 # Load .env variables into os.environ
 load_dotenv()
 
+from backend.app.core.upload_observability import UploadObservability
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -40,6 +41,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(UploadObservability)
 
 # Mount Routes under /api/v1 (Official API Contract)
 app.include_router(health_router, prefix=settings.api_prefix)
