@@ -39,8 +39,7 @@ class DocumentRegistry:
 
         document_id = doc_id or f"doc_{len(self.documents) + 1}"
         destination = self.upload_dir / f"{document_id}_{filename}"
-        if not destination.exists():
-            shutil.copy2(file_path, destination)
+        shutil.copy2(file_path, destination)
         self.file_paths[document_id] = destination
 
         # Check disk cache

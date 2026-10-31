@@ -1,3 +1,4 @@
+import re
 import shutil
 import tempfile
 from pathlib import Path
@@ -92,20 +93,29 @@ def get_document_suggestions(document_id: str) -> list[dict[str, Any]]:
         t_title = best_table.title or f"Table on Page {best_table.printed_page_number}"
         t_clean_title = t_title.replace("Title:", "").strip()
 
+        # Flatten headers (headers can be list[list[str]] or list[str])
+        flat_headers: list[str] = []
+        for h in best_table.headers:
+            if isinstance(h, list):
+                flat_headers.extend([str(item) for item in h if item])
+            elif h:
+                flat_headers.append(str(h))
+
         # Find year columns if any
-        year_headers = [h for h in best_table.headers if re.search(r"\b(20\d\d|19\d\d)\b", h)]
+        year_headers = [h for h in flat_headers if re.search(r"\b(20\d\d|19\d\d)\b", h)]
         
         # 1. Row lookup
         first_row_label = ""
         for r in best_table.rows:
-            label = r[1] if len(r) > 1 and r[1] and not r[1].isdigit() else r[0]
-            if label and not label.isdigit() and label.lower() not in ("total", "s.no.", "s. no.", "sl"):
-                first_row_label = label
+            label = r[1] if len(r) > 1 and r[1] and not str(r[1]).isdigit() else r[0]
+            if label and not str(label).isdigit() and str(label).lower() not in ("total", "s.no.", "s. no.", "sl"):
+                first_row_label = str(label)
                 break
 
         if first_row_label:
             if year_headers:
-                latest_year = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1]).group(1)
+                year_match = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1])
+                latest_year = year_match.group(1) if year_match else "2023"
                 suggestions.append({
                     "category": "Table Lookup",
                     "label": f"🎯 Table Lookup: {first_row_label} ({latest_year})",
@@ -122,26 +132,33 @@ def get_document_suggestions(document_id: str) -> list[dict[str, Any]]:
 
         # 2. Deterministic Arithmetic (Percentage Change across periods)
         if len(year_headers) >= 2 and first_row_label:
-            y1 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-2]).group(1)
-            y2 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1]).group(1)
-            suggestions.append({
-                "category": "Deterministic Arithmetic",
-                "label": f"🔢 Deterministic Math: {first_row_label} ({y1}-{y2})",
-                "question": f"What was the percentage change in {first_row_label} between {y1} and {y2}?",
-                "intent": "comparison",
-            })
+            m1 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-2])
+            m2 = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1])
+            if m1 and m2:
+                y1 = m1.group(1)
+                y2 = m2.group(1)
+                suggestions.append({
+                    "category": "Deterministic Arithmetic",
+                    "label": f"🔢 Deterministic Math: {first_row_label} ({y1}-{y2})",
+                    "question": f"What was the percentage change in {first_row_label} between {y1} and {y2}?",
+                    "intent": "comparison",
+                })
 
         # 3. Cross-Entity Difference
         valid_row_labels = []
         for r in best_table.rows:
-            lbl = r[1] if len(r) > 1 and r[1] and not r[1].isdigit() else r[0]
-            if lbl and not lbl.isdigit() and lbl.lower() not in ("total", "s.no.", "s. no.", "sl"):
-                valid_row_labels.append(lbl)
+            lbl = r[1] if len(r) > 1 and r[1] and not str(r[1]).isdigit() else r[0]
+            if lbl and not str(lbl).isdigit() and str(lbl).lower() not in ("total", "s.no.", "s. no.", "sl"):
+                valid_row_labels.append(str(lbl))
                 if len(valid_row_labels) >= 2:
                     break
 
         if len(valid_row_labels) >= 2:
-            period_suffix = f" in {re.search(r'\b(20\d\d|19\d\d)\b', year_headers[-1]).group(1)}" if year_headers else ""
+            period_suffix = ""
+            if year_headers:
+                year_match = re.search(r"\b(20\d\d|19\d\d)\b", year_headers[-1])
+                if year_match:
+                    period_suffix = f" in {year_match.group(1)}"
             suggestions.append({
                 "category": "Multi-Entity Difference",
                 "label": f"⚖️ Comparison: {valid_row_labels[0]} vs {valid_row_labels[1]}",

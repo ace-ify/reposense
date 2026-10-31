@@ -31,7 +31,8 @@ def test_upload_cache_uses_pdf_sha256_and_indexes_each_document(tmp_path, monkey
     monkeypatch.setattr(documents, "get_registry", lambda: registry)
 
     original_pdf = make_pdf("Same exact PDF content")
-    changed_pdf = make_pdf("Other PDF content here")
+    changed_pdf = make_pdf("Other PDF content here!")
+    assert len(original_pdf) == len(changed_pdf)
 
     with TestClient(app) as client:
         first = client.post(
