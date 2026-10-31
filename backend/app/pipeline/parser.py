@@ -126,16 +126,52 @@ class PyMuPDFDocumentParser(DocumentParser):
                 if not extracted_data or len(extracted_data) == 0:
                     continue
 
-                headers: list[list[str]] = []
+                # Detect header rows vs data rows dynamically across multi-level tables
+                first_data_idx = 1
+                for idx in range(min(5, len(extracted_data))):
+                    r = extracted_data[idx]
+                    if not r:
+                        continue
+                    c0 = str(r[0] or "").strip()
+                    c1 = str(r[1] or "").strip() if len(r) > 1 else ""
+                    if c0.isdigit() and len(c1) > 1 and not c1.isdigit():
+                        first_data_idx = idx
+                        break
+
+                header_rows = extracted_data[:first_data_idx]
+                data_rows_raw = extracted_data[first_data_idx:]
+                num_cols = len(extracted_data[0])
+
+                # Forward fill merged headers across columns
+                filled_headers = []
+                for h_row in header_rows:
+                    filled = []
+                    last_val = ""
+                    for cell in h_row:
+                        val = self._normalize_text(str(cell or ""))
+                        if val:
+                            last_val = val
+                        filled.append(last_val)
+                    while len(filled) < num_cols:
+                        filled.append(last_val)
+                    filled_headers.append(filled)
+
+                # Merge vertical header hierarchy per column
+                raw_header: list[str] = []
+                for col in range(num_cols):
+                    col_parts = []
+                    for h_row in filled_headers:
+                        val = h_row[col]
+                        if val and val not in col_parts:
+                            col_parts.append(val)
+                    merged_col = " - ".join(col_parts) if col_parts else f"Col {col + 1}"
+                    raw_header.append(merged_col)
+
+                headers: list[list[str]] = [raw_header]
                 rows: list[list[Any]] = []
 
-                # Assume first row is primary header
-                raw_header = [self._normalize_text(str(cell or "")) for cell in extracted_data[0]]
-                headers.append(raw_header)
-
-                for r_idx in range(1, len(extracted_data)):
-                    row_data = [self._normalize_text(str(cell or "")) for cell in extracted_data[r_idx]]
-                    # Check if entire row is empty
+                for r_data in data_rows_raw:
+                    row_data = [self._normalize_text(str(cell or "")) for cell in r_data]
                     if any(c for c in row_data):
                         rows.append(row_data)
 
