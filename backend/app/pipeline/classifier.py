@@ -31,9 +31,9 @@ class QuestionClassifier:
     }
 
     ARITHMETIC_TRIGGERS = {
-        "percent", "percentage", "increase", "decrease", "growth", "difference",
-        "delta", "total", "sum", "average", "mean", "ratio", "portion", "share",
-        "rate of change"
+        "percentage change", "percent change", "percentage increase", "percentage decrease",
+        "growth rate", "percent increase", "percent decrease", "rate of change",
+        "difference between", "difference in", "ratio of", "ratio between"
     }
 
     def classify(self, question: str) -> QuestionClassification:
@@ -49,7 +49,12 @@ class QuestionClassifier:
         )
 
         # Check for arithmetic
-        requires_arithmetic = any(trigger in q_lower for trigger in self.ARITHMETIC_TRIGGERS)
+        explicit_calc = any(trigger in q_lower for trigger in self.ARITHMETIC_TRIGGERS)
+        has_comparison = any(w in q_lower for w in ["percent", "percentage", "increase", "decrease", "growth", "difference"])
+        has_two_periods = len(periods) >= 2
+        has_between = bool(re.search(r"\bbetween\s+.+?\s+(?:and|vs)\s+", q_lower))
+
+        requires_arithmetic = explicit_calc or (has_comparison and (has_two_periods or has_between))
 
         # Determine Intent
         intent: QuestionIntent = "lookup"

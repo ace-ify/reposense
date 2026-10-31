@@ -22,7 +22,7 @@ interface ResearchDashboardProps {
   activity: ActivityEntry[];
   evalData: EvaluationData | null;
   isEvalRunning: boolean;
-  isUploading: boolean;
+  uploadStatus: "uploading" | "indexing" | null;
   onSelectDocument: (docId: string, initialQuestion?: string) => void;
   onFileUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onRunBenchmark: () => void;
@@ -34,7 +34,7 @@ export const ResearchDashboard: React.FC<ResearchDashboardProps> = ({
   activity,
   evalData,
   isEvalRunning,
-  isUploading,
+  uploadStatus,
   onSelectDocument,
   onFileUpload,
   onRunBenchmark,
@@ -413,12 +413,18 @@ export const ResearchDashboard: React.FC<ResearchDashboardProps> = ({
                       <div className="card-header-actions">
                         <label className="btn-upload-label">
                           <Upload size={13} />
-                          <span>{isUploading ? "Uploading..." : "Upload PDF"}</span>
+                          <span>
+                            {uploadStatus === "uploading"
+                              ? "Uploading..."
+                              : uploadStatus === "indexing"
+                                ? "Indexing..."
+                                : "Upload PDF"}
+                          </span>
                           <input
                             type="file"
                             accept=".pdf"
                             className="hidden-file-input"
-                            disabled={isUploading}
+                            disabled={uploadStatus !== null}
                             onChange={onFileUpload}
                           />
                         </label>

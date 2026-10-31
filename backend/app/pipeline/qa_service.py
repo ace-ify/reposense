@@ -96,6 +96,14 @@ class QAService:
             if ent_clean and len(ent_clean) > 2 and ent_clean.lower() not in ("the", "which", "what"):
                 entities.append(ent_clean)
 
+        # Prepositional entity: "of <Entity>", "for <Entity>" (e.g. rate of Pembrolizumab, investments in Solar PV)
+        m_of = re.search(r"\b(?:rate of|survival rate of|share of|total of|cost of|investment in|investments in|of|for)\s+([A-Za-z0-9\s\-]+?)(?:\s+(?:in\s+20\d\d|during|in\s+[A-Za-z]+|\?)|$)", q_norm, re.IGNORECASE)
+        if m_of:
+            ent = m_of.group(1).strip()
+            ent_clean = re.sub(r"\b(road|accident|accidents|number|total|deaths|persons|killed|reported|occurred|rate|rates|survival|level|share)\b", "", ent, flags=re.IGNORECASE).strip()
+            if ent_clean and len(ent_clean) > 2 and ent_clean.lower() not in ("the", "which", "what"):
+                entities.append(ent_clean)
+
         # "due to <Cause>", "caused by <Cause>", "without wearing <Item>", "not wearing <Item>"
         m_cause = re.search(r"\b(?:due to|caused by|from not wearing|without wearing)\s+([A-Za-z\s\-]+?)(?:\s+(?:in|during|\?)|$)", q_norm, re.IGNORECASE)
         if m_cause:
@@ -160,12 +168,24 @@ class QAService:
 
         # Retrieve candidate evidence using indexed registry retriever
         classification = self.classifier.classify(question)
+        if classification.target_entities:
+            for te in classification.target_entities:
+                if te.lower() not in [e.lower() for e in entities]:
+                    entities.append(te)
+                tokens = [w for w in te.split() if w.lower() not in {"the", "a", "an", "rate", "survival", "total", "number", "level", "value"}]
+                for tok in tokens:
+                    if len(tok) > 2 and tok.lower() not in [e.lower() for e in entities]:
+                        entities.append(tok)
+
         candidates = list(self.registry.retriever.retrieve(question, [document_id], top_k=25, entities=entities))
 
         # Check if query specifically targets entities that do not exist anywhere in document
         if entities:
             # If none of the candidate items contain the entity, check if entity exists anywhere in document
-            has_entity_in_candidates = any(any(e.lower() in c.text.lower() for e in entities) for c in candidates)
+            has_entity_in_candidates = any(
+                any(e.lower().replace(" ", "") in c.text.lower().replace(" ", "") for e in entities)
+                for c in candidates
+            )
             if not has_entity_in_candidates:
                 # Entity absent from candidates
                 return "NOT_FOUND", None, 0.95
@@ -311,10 +331,10 @@ class QAService:
 
                 # Match primary geographic entity
                 if primary_entities:
-                    if not any(pe.lower() in row_text for pe in primary_entities):
+                    if not any(pe.lower().replace(" ", "") in row_text.replace(" ", "") for pe in primary_entities):
                         continue
                 elif entities:
-                    if not any(e.lower() in row_text for e in entities):
+                    if not any(e.lower().replace(" ", "") in row_text.replace(" ", "") for e in entities):
                         continue
                 else:
                     # National query: check for total row
@@ -393,7 +413,7 @@ class QAService:
                         if "---" in row_line:
                             continue
                         r_lower = row_line.lower()
-                        if primary_entities and not any(pe.lower() in r_lower for pe in primary_entities):
+                        if primary_entities and not any(pe.lower().replace(" ", "") in r_lower.replace(" ", "") for pe in primary_entities):
                             continue
                         cells = [c.strip() for c in row_line.strip("|").split("|")]
                         for c_idx, cell in enumerate(cells):

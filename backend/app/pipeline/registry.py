@@ -1,3 +1,6 @@
+import gzip
+import hashlib
+import json
 import shutil
 from pathlib import Path
 from backend.app.core.config import get_settings
@@ -43,21 +46,46 @@ class DocumentRegistry:
         # Check disk cache
         cache_dir = self.upload_dir / ".cache"
         cache_dir.mkdir(parents=True, exist_ok=True)
-        file_stat = file_path.stat()
-        cache_key = f"{file_path.stem}_{file_stat.st_size}"
-        cache_file = cache_dir / f"{cache_key}.json.gz"
+        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        cache_file = cache_dir / f"{content_hash}.json.gz"
 
         if cache_file.exists():
-            import gzip
-            import json
             try:
                 with gzip.open(cache_file, "rt", encoding="utf-8") as f:
                     cache_data = json.load(f)
                 doc_item = DocumentItem(**cache_data["doc_item"])
+                cached_document_id = doc_item.document_id
                 doc_item.document_id = document_id
-                page_provs = [PageProvenance(**p) for p in cache_data["page_provs"]]
-                evidence_items = [EvidenceItem(**e) for e in cache_data["evidence_items"]]
-                table_items = [TableItem(**t) for t in cache_data["table_items"]]
+                doc_item.filename = filename
+
+                def rebind_id(value: str | None) -> str | None:
+                    return value.replace(cached_document_id, document_id) if value else value
+
+                page_provs = [
+                    PageProvenance(**{**p, "document_id": document_id})
+                    for p in cache_data["page_provs"]
+                ]
+                evidence_items = [
+                    EvidenceItem(**{
+                        **e,
+                        "document_id": document_id,
+                        "evidence_id": rebind_id(e.get("evidence_id")),
+                        "parent_id": rebind_id(e.get("parent_id")),
+                        "metadata": {
+                            key: rebind_id(value) if isinstance(value, str) else value
+                            for key, value in e.get("metadata", {}).items()
+                        },
+                    })
+                    for e in cache_data["evidence_items"]
+                ]
+                table_items = [
+                    TableItem(**{
+                        **t,
+                        "document_id": document_id,
+                        "table_id": rebind_id(t.get("table_id")),
+                    })
+                    for t in cache_data["table_items"]
+                ]
             except Exception:
                 doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
                     destination, document_id
@@ -77,8 +105,6 @@ class DocumentRegistry:
             doc_item, page_provs, evidence_items, table_items = self.parser.parse_document(
                 destination, document_id
             )
-            import gzip
-            import json
             try:
                 with gzip.open(cache_file, "wt", encoding="utf-8") as f:
                     json.dump(

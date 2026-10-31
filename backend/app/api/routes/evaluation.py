@@ -196,7 +196,11 @@ def execute_benchmark() -> dict[str, Any]:
     mrr = round(mrr_sum / total, 2)
 
     return {
+        "suite_type": "demo_regression_suite",
+        "description": "Built-in demo evaluation suite running against seeded sample reports. Note: This executes the local demo suite, NOT the hidden judge evaluation.",
+        "is_judge_evaluation": False,
         "summary": {
+            "suite_name": "Demo Benchmark Suite (Seeded Samples)",
             "total_cases": total,
             "passed_cases": passed_count,
             "accuracy_percentage": accuracy_pct,
@@ -208,10 +212,20 @@ def execute_benchmark() -> dict[str, Any]:
         "cases": results,
     }
 
-@router.get("", response_model=dict[str, Any])
+@router.get(
+    "",
+    response_model=dict[str, Any],
+    summary="Get demo benchmark scorecard",
+    description="Returns results of the built-in demo test suite against seeded sample documents. Note: This executes the demo regression suite, not the hidden judge evaluation.",
+)
 def get_benchmark_scorecard() -> dict[str, Any]:
     return execute_benchmark()
 
-@router.post("/run", response_model=dict[str, Any])
+@router.post(
+    "/run",
+    response_model=dict[str, Any],
+    summary="Run demo benchmark suite",
+    description="Executes the built-in demo test suite against seeded sample documents. Note: This executes the demo regression suite, not the hidden judge evaluation.",
+)
 def run_benchmark_suite() -> dict[str, Any]:
     return execute_benchmark()

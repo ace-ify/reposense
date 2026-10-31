@@ -34,6 +34,7 @@ import {
 } from "../types";
 import { PdfViewer } from "./PdfViewer";
 import { TableExplorer } from "./TableExplorer";
+import { apiUrl } from "../api";
 
 interface ReportWorkspaceProps {
   document: DocumentItem | null;
@@ -167,7 +168,7 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
     return items.sort((a, b) => a.pageIndex - b.pageIndex);
   }, [evidenceData]);
 
-  const pdfUrl = document ? `/api/v1/documents/${document.document_id}/pdf` : null;
+  const pdfUrl = document ? apiUrl(`/api/v1/documents/${document.document_id}/pdf`) : null;
   const isIndexed = document?.processing_status === "ready" || (document?.page_count || 0) > 0;
 
   // Extract structured key-values from answerData for Evidence tab
@@ -375,7 +376,7 @@ export const ReportWorkspace: React.FC<ReportWorkspaceProps> = ({
 
           {document && (
             <a
-              href={`/api/v1/documents/${document.document_id}/pdf`}
+              href={apiUrl(`/api/v1/documents/${document.document_id}/pdf`)}
               download={document.filename}
               className="workspace-action-btn"
               title="Download original PDF"

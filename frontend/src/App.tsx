@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { apiUrl } from "./api";
 import { ResearchDashboard } from "./components/ResearchDashboard";
 import { ReportWorkspace } from "./components/ReportWorkspace";
 import {
@@ -31,7 +32,7 @@ export const App: React.FC = () => {
   const [targetPageIndex, setTargetPageIndex] = useState<number>(0);
   const [activeHighlight, setActiveHighlight] = useState<HighlightBox | null>(null);
   const [isLoadingQuestion, setIsLoadingQuestion] = useState<boolean>(false);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [uploadStatus, setUploadStatus] = useState<"uploading" | "indexing" | null>(null);
 
   // Benchmarks & Activity Feed
   // NOTE: Initial state is null to show an honest empty state until a benchmark has been run!
@@ -69,7 +70,7 @@ export const App: React.FC = () => {
     const sharedDocId = urlParams.get("doc");
 
     // Load registered documents from live API
-    fetch("/api/v1/documents")
+    fetch(apiUrl("/api/v1/documents"))
       .then((res) => res.json())
       .then((docs: DocumentItem[]) => {
         if (Array.isArray(docs) && docs.length > 0) {
@@ -93,7 +94,7 @@ export const App: React.FC = () => {
       .catch((err) => console.error("Error loading documents:", err));
 
     // Load sample report definitions
-    fetch("/api/v1/samples")
+    fetch(apiUrl("/api/v1/samples"))
       .then((res) => res.json())
       .then((sampleData: SampleReport[]) => {
         setSamples(sampleData);
@@ -126,7 +127,7 @@ export const App: React.FC = () => {
 
     let isCurrent = true;
 
-    fetch(`/api/v1/documents/${selectedDocId}/evidence`)
+    fetch(apiUrl(`/api/v1/documents/${selectedDocId}/evidence`))
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to fetch evidence.`);
         return res.json();
@@ -143,7 +144,7 @@ export const App: React.FC = () => {
         setIsLoadingEvidence(false);
       });
 
-    fetch(`/api/v1/documents/${selectedDocId}/suggestions`)
+    fetch(apiUrl(`/api/v1/documents/${selectedDocId}/suggestions`))
       .then((res) => res.json())
       .then((suggs) => {
         if (!isCurrent) return;
@@ -167,17 +168,31 @@ export const App: React.FC = () => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setIsUploading(true);
+    setUploadStatus("uploading");
     const formData = new FormData();
     formData.append("file", file);
 
     try {
-      const res = await fetch("/api/v1/documents", {
-        method: "POST",
-        body: formData,
+      const newDoc = await new Promise<DocumentItem>((resolve, reject) => {
+        const request = new XMLHttpRequest();
+        request.open("POST", apiUrl("/api/v1/documents"));
+        request.upload.addEventListener("progress", (event) => {
+          if (event.lengthComputable && event.loaded >= event.total) {
+            setUploadStatus("indexing");
+          }
+        });
+        request.upload.addEventListener("load", () => setUploadStatus("indexing"));
+        request.addEventListener("load", () => {
+          if (request.status < 200 || request.status >= 300) {
+            reject(new Error(`Upload failed with HTTP ${request.status}`));
+            return;
+          }
+          resolve(JSON.parse(request.responseText) as DocumentItem);
+        });
+        request.addEventListener("error", () => reject(new Error("Upload failed")));
+        request.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+        request.send(formData);
       });
-      if (!res.ok) throw new Error("Upload failed");
-      const newDoc: DocumentItem = await res.json();
       setDocuments((prev) => [newDoc, ...prev]);
       setSelectedDocId(newDoc.document_id);
       addActivity(`Indexed ${newDoc.filename}`, `${newDoc.page_count} pages processed`, "upload");
@@ -185,7 +200,7 @@ export const App: React.FC = () => {
     } catch (err) {
       alert("Failed to upload and parse PDF document.");
     } finally {
-      setIsUploading(false);
+      setUploadStatus(null);
     }
   };
 
@@ -199,7 +214,7 @@ export const App: React.FC = () => {
     setActiveHighlight(null);
 
     try {
-      const res = await fetch("/api/v1/questions", {
+      const res = await fetch(apiUrl("/api/v1/questions"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -290,7 +305,7 @@ export const App: React.FC = () => {
   const handleRunBenchmark = async () => {
     setIsEvalRunning(true);
     try {
-      const res = await fetch("/api/v1/evaluation/run", { method: "POST" });
+      const res = await fetch(apiUrl("/api/v1/evaluation/run"), { method: "POST" });
       const data: EvaluationData = await res.json();
       setEvalData(data);
       addActivity(
@@ -316,7 +331,7 @@ export const App: React.FC = () => {
           activity={activity}
           evalData={evalData}
           isEvalRunning={isEvalRunning}
-          isUploading={isUploading}
+          uploadStatus={uploadStatus}
           onSelectDocument={handleSelectDocument}
           onFileUpload={handleFileUpload}
           onRunBenchmark={handleRunBenchmark}

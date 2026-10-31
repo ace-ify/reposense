@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     reranker_model: str = "BAAI/bge-reranker-v2-m3"
     upload_dir: str = "data/uploads"
     max_upload_mb: int = 100
+    seed_sample_documents: bool = False
     groq_api_key: str | None = None
     openai_api_key: str | None = None
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

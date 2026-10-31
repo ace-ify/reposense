@@ -18,9 +18,9 @@ from backend.app.pipeline.sample_data import seed_sample_documents
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Seed sample documents on startup for instant demo readiness
-    registry = get_registry()
-    seed_sample_documents(registry)
+    # Synthetic sample PDFs are only created when explicitly enabled for local demos.
+    if settings.seed_sample_documents:
+        seed_sample_documents(get_registry())
     yield
 
 settings = get_settings()
@@ -48,12 +48,8 @@ app.include_router(questions_router, prefix=settings.api_prefix)
 app.include_router(samples_router, prefix=settings.api_prefix)
 app.include_router(evaluation_router, prefix=settings.api_prefix)
 
-# Mount Routes under root as well (convenience fallback for evaluators)
+# Root level health probe (standard for container/orchestrator health checks)
 app.include_router(health_router)
-app.include_router(documents_router)
-app.include_router(questions_router)
-app.include_router(samples_router)
-app.include_router(evaluation_router)
 
 @app.get("/")
 def root() -> dict[str, str]:

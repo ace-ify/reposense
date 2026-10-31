@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: report-navigator-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    autoDeployTrigger: off
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: UPLOAD_DIR
+        value: /tmp/report-navigator/uploads
+      - key: MAX_UPLOAD_MB
+        value: "100"
+
+  - type: web
+    name: report-navigator-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeployTrigger: off
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://report-navigator-api.onrender.com
